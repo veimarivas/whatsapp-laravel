@@ -1,0 +1,50 @@
+<?php
+
+use App\Jobs\SendBroadcastJob;
+use App\Models\Broadcast;
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
+
+Artisan::command('inspire', function () {
+    $this->comment(Inspiring::quote());
+})->purpose('Display an inspiring quote');
+
+// Encola los broadcasts cuya hora programada ya llegó. Reemplaza los
+// endpoints cron del original: aquí lo dispara el scheduler de Laravel
+// (requiere `php artisan schedule:work` o el cron de schedule:run).
+Artisan::command('broadcasts:process-scheduled', function () {
+    $due = Broadcast::where('status', 'scheduled')
+        ->where('scheduled_at', '<=', now())
+        ->get();
+
+    foreach ($due as $broadcast) {
+        $broadcast->update(['status' => 'sending']);
+        SendBroadcastJob::dispatch($broadcast->id);
+        $this->info("Broadcast {$broadcast->id} ({$broadcast->name}) encolado.");
+    }
+
+    $this->info("Procesados: {$due->count()}");
+})->purpose('Encola los broadcasts programados que ya vencieron');
+
+Schedule::command('broadcasts:process-scheduled')->everyMinute();
+
+// Reanuda automatizaciones detenidas en un paso "wait" cuya hora venció.
+Artisan::command('automations:process-pending', function (\App\Services\Automations\Engine $engine) {
+    $due = \App\Models\AutomationPendingExecution::due()->limit(100)->get();
+
+    foreach ($due as $pending) {
+        $engine->resume($pending);
+    }
+
+    $this->info("Reanudadas: {$due->count()}");
+})->purpose('Reanuda las esperas de automatizaciones vencidas');
+
+Schedule::command('automations:process-pending')->everyMinute();
+
+// Cierra runs de flows abandonados (cliente dejó de responder).
+Artisan::command('flows:process-timeouts', function (\App\Services\Flows\Runner $runner) {
+    $this->info('Runs cerrados por timeout: '.$runner->sweepTimeouts());
+})->purpose('Cierra runs de flows que superaron el timeout de su política');
+
+Schedule::command('flows:process-timeouts')->everyFiveMinutes();
