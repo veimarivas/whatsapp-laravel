@@ -454,6 +454,15 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
         loadConversations();
     };
 
+    const toggleAiMode = async () => {
+        if (!selectedId) return;
+        const nextEnabled = !!selected.ai_autoreply_disabled; // pasar a IA si estaba en Humano
+        try {
+            await api(route('inbox.ai-mode', selectedId), { method: 'PATCH', body: JSON.stringify({ ai_enabled: nextEnabled }) });
+            loadConversations();
+        } catch (err) { setError(err.message); }
+    };
+
     const reactTo = async (msg, emoji) => {
         try {
             await api(route('inbox.react', msg.id), { method: 'POST', body: JSON.stringify({ emoji }) });
@@ -664,6 +673,35 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {hasAi && (
+                                            <button
+                                                type="button"
+                                                onClick={toggleAiMode}
+                                                title={selected.ai_autoreply_disabled ? 'Cambiar a IA (auto-respuesta)' : 'Cambiar a Humano (silenciar IA)'}
+                                                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold border transition-all shadow-sm ${
+                                                    selected.ai_autoreply_disabled
+                                                        ? 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                                        : 'border-violet-300 bg-gradient-to-br from-violet-50 to-purple-50 text-violet-700 shadow-violet-500/10'
+                                                }`}
+                                            >
+                                                {selected.ai_autoreply_disabled ? (
+                                                    <>
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                        </svg>
+                                                        Humano
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                                        </svg>
+                                                        IA activa
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                    </>
+                                                )}
+                                            </button>
+                                        )}
                                         <select
                                             value={selected.assigned_agent_id ?? ''}
                                             onChange={(e) => assign(e.target.value)}

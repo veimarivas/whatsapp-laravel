@@ -49,6 +49,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/inbox/conversations/{conversation}/notes', [InboxController::class, 'notes'])->name('inbox.notes');
     Route::post('/inbox/conversations/{conversation}/notes', [InboxController::class, 'addNote'])->name('inbox.notes.add');
     Route::post('/inbox/conversations/{conversation}/ai-draft', [InboxController::class, 'aiDraft'])->name('inbox.ai-draft');
+    Route::patch('/inbox/conversations/{conversation}/ai-mode', [InboxController::class, 'setAiMode'])->name('inbox.ai-mode');
 
     // IA
     Route::get('/settings/ai', [\App\Http\Controllers\AiController::class, 'edit'])->name('settings.ai');

@@ -108,15 +108,27 @@ class InboxController extends Controller
             'last_message_at' => now(),
         ]);
 
-        // Handoff humano: el flow cede el control y el bot IA se apaga
-        // en esta conversación (mismo comportamiento que el original).
+        // Handoff del flow (chatbot cede el control), pero el modo IA/Humano
+        // ahora lo controla el agente con el toggle explícito del header.
         app(\App\Services\Flows\Runner::class)->pauseForConversation($conversation);
 
-        if (! $conversation->ai_autoreply_disabled) {
-            $conversation->update(['ai_autoreply_disabled' => true]);
-        }
-
         return response()->json($message->fresh());
+    }
+
+    /** Cambia el modo de la conversación: IA (auto-respuesta) o Humano. */
+    public function setAiMode(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->authorizeConversation($request, $conversation);
+
+        $validated = $request->validate(['ai_enabled' => 'required|boolean']);
+
+        $conversation->update([
+            'ai_autoreply_disabled' => ! $validated['ai_enabled'],
+            // Al reactivar IA, se reinicia el contador para permitir nuevas respuestas.
+            'ai_reply_count' => $validated['ai_enabled'] ? 0 : $conversation->ai_reply_count,
+        ]);
+
+        return response()->json($conversation->fresh());
     }
 
     /** Marca la conversación como leída. */
