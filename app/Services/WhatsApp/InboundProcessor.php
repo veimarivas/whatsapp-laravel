@@ -6,8 +6,10 @@ use App\Jobs\ProcessAutomationEventJob;
 use App\Models\BroadcastRecipient;
 use App\Models\Contact;
 use App\Models\Conversation;
+use App\Models\Deal;
 use App\Models\Message;
 use App\Models\MessageReaction;
+use App\Models\Pipeline;
 use App\Models\WhatsappConfig;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -147,6 +149,7 @@ class InboundProcessor
         $text = $storedMessage->content_text;
 
         if ($isNewContact) {
+            $this->createLeadDeal($contact, $conversation);
             ProcessAutomationEventJob::dispatch('new_contact', $contact->id, $conversation->id, $text);
         }
 
@@ -291,5 +294,39 @@ class InboundProcessor
         if ($counter) {
             $recipient->broadcast?->increment($counter);
         }
+    }
+
+    /**
+     * Crea un deal en la primera etapa del pipeline por defecto de la cuenta
+     * al recibir un lead nuevo desde WhatsApp. Silencioso si la cuenta no
+     * tiene pipelines configurados o si el contacto ya tiene un deal abierto.
+     */
+    private function createLeadDeal(Contact $contact, Conversation $conversation): void
+    {
+        // Evita duplicados: si el contacto ya tiene un deal abierto, no crea otro.
+        if (Deal::where('contact_id', $contact->id)->where('status', 'open')->exists()) {
+            return;
+        }
+
+        $pipeline = Pipeline::forAccount($contact->account_id)
+            ->with(['stages' => fn ($q) => $q->orderBy('position')])
+            ->orderBy('created_at')
+            ->first();
+
+        $firstStage = $pipeline?->stages->first();
+
+        if (! $pipeline || ! $firstStage) {
+            return;
+        }
+
+        Deal::create([
+            'account_id' => $contact->account_id,
+            'pipeline_id' => $pipeline->id,
+            'stage_id' => $firstStage->id,
+            'contact_id' => $contact->id,
+            'conversation_id' => $conversation->id,
+            'title' => $contact->name ?: $contact->phone,
+            'status' => 'open',
+        ]);
     }
 }
