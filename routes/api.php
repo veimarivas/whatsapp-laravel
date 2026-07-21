@@ -36,6 +36,10 @@ Route::prefix('v1')->middleware('throttle:public-api')->group(function () {
         Route::get('/broadcasts/{id}', [ApiController::class, 'showBroadcast']);
     });
 
+    // Notificaciones consolidadas del Komo Hub (Fase 5).
+    Route::get('/notifications', [ApiController::class, 'notifications'])
+        ->middleware('api.key:notifications:read');
+
     Route::post('/broadcasts', [ApiController::class, 'storeBroadcast'])
         ->middleware('api.key:broadcasts:write');
 });

@@ -61,6 +61,14 @@ class SsoController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
+        // ?next= permite encadenar el salto SSO con una ruta interna
+        // (deep-links desde la campana consolidada del hub). Solo se
+        // acepta un path relativo (mismo host) para evitar open-redirects.
+        $next = (string) $request->query('next', '');
+        if ($next !== '' && str_starts_with($next, '/') && ! str_starts_with($next, '//')) {
+            return redirect($next);
+        }
+
         return redirect()->route('dashboard');
     }
 

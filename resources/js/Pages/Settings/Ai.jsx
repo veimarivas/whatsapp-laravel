@@ -4,11 +4,13 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 const DEFAULT_MODELS = {
     openai: 'gpt-4o-mini',
     anthropic: 'claude-sonnet-5',
+    ollama: 'qwen2.5:7b',
 };
 
 const PROVIDER_META = {
     openai: { name: 'OpenAI', gradient: 'from-emerald-500 to-teal-600' },
     anthropic: { name: 'Anthropic', gradient: 'from-orange-500 to-amber-600' },
+    ollama: { name: 'Ollama', gradient: 'from-sky-500 to-indigo-600' },
 };
 
 export default function Ai({ config, documents }) {
@@ -17,6 +19,7 @@ export default function Ai({ config, documents }) {
     const form = useForm({
         provider: config?.provider ?? 'openai',
         model: config?.model ?? DEFAULT_MODELS.openai,
+        base_url: config?.base_url ?? 'http://127.0.0.1:11434',
         api_key: '',
         embeddings_api_key: '',
         system_prompt: config?.system_prompt ?? '',
@@ -24,6 +27,8 @@ export default function Ai({ config, documents }) {
         auto_reply_enabled: config?.auto_reply_enabled ?? false,
         auto_reply_max_per_conversation: config?.auto_reply_max_per_conversation ?? 3,
     });
+
+    const isOllama = form.data.provider === 'ollama';
 
     const docForm = useForm({ title: '', content: '' });
 
@@ -90,6 +95,7 @@ export default function Ai({ config, documents }) {
                                 >
                                     <option value="openai">OpenAI</option>
                                     <option value="anthropic">Anthropic</option>
+                                    <option value="ollama">Ollama (local)</option>
                                 </select>
                             </div>
                             <div>
@@ -104,6 +110,25 @@ export default function Ai({ config, documents }) {
                             </div>
                         </div>
 
+                        {isOllama && (
+                            <div>
+                                <label htmlFor="base_url" className="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Base URL <span className="text-gray-400 font-normal">— endpoint de Ollama</span>
+                                </label>
+                                <input
+                                    id="base_url"
+                                    value={form.data.base_url}
+                                    onChange={(e) => form.setData('base_url', e.target.value)}
+                                    placeholder="http://127.0.0.1:11434"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm font-mono bg-gray-50 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500 focus:bg-white transition-all"
+                                />
+                                <p className="mt-1.5 text-xs text-gray-400">
+                                    Si Ollama corre en el mismo servidor de Laravel, deja el valor por defecto.
+                                </p>
+                            </div>
+                        )}
+
+                        {!isOllama && (
                         <div>
                             <label htmlFor="api_key" className="block text-sm font-semibold text-gray-700 mb-1.5">
                                 API key {config && <span className="text-gray-400 font-normal">(vacío = conservar la actual)</span>}
@@ -120,6 +145,7 @@ export default function Ai({ config, documents }) {
                             />
                             {form.errors.api_key && <p className="mt-1 text-xs text-red-500 font-medium">{form.errors.api_key}</p>}
                         </div>
+                        )}
 
                         <div>
                             <label htmlFor="embeddings_api_key" className="block text-sm font-semibold text-gray-700 mb-1.5">

@@ -27,9 +27,39 @@ class Client
      */
     public function chat(array $messages, ?string $system = null, int $maxTokens = 500): string
     {
-        return $this->config->provider === 'anthropic'
-            ? $this->anthropic($messages, $system, $maxTokens)
-            : $this->openai($messages, $system, $maxTokens);
+        return match ($this->config->provider) {
+            'anthropic' => $this->anthropic($messages, $system, $maxTokens),
+            'ollama' => $this->ollama($messages, $system, $maxTokens),
+            default => $this->openai($messages, $system, $maxTokens),
+        };
+    }
+
+    /**
+     * Ollama local (o cualquier endpoint compatible con /api/chat).
+     * No requiere API key; se conecta al base_url configurado en la cuenta.
+     */
+    private function ollama(array $messages, ?string $system, int $maxTokens): string
+    {
+        $baseUrl = rtrim($this->config->base_url ?: 'http://127.0.0.1:11434', '/');
+
+        $payload = [
+            'model' => $this->config->model,
+            'stream' => false,
+            'options' => ['num_predict' => $maxTokens],
+            'messages' => [
+                ...($system ? [['role' => 'system', 'content' => $system]] : []),
+                ...$messages,
+            ],
+        ];
+
+        $response = Http::timeout(120)
+            ->post($baseUrl.'/api/chat', $payload);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Ollama: '.($response->json('error') ?? $response->status()));
+        }
+
+        return trim($response->json('message.content') ?? '');
     }
 
     private function openai(array $messages, ?string $system, int $maxTokens): string

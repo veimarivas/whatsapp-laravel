@@ -25,6 +25,7 @@ class AiController extends Controller
             'config' => $config ? [
                 'provider' => $config->provider,
                 'model' => $config->model,
+                'base_url' => $config->base_url,
                 'system_prompt' => $config->system_prompt,
                 'is_active' => $config->is_active,
                 'auto_reply_enabled' => $config->auto_reply_enabled,
@@ -42,8 +43,9 @@ class AiController extends Controller
     public function update(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'provider' => ['required', Rule::in(['openai', 'anthropic'])],
+            'provider' => ['required', Rule::in(['openai', 'anthropic', 'ollama'])],
             'model' => 'required|string|max:100',
+            'base_url' => 'nullable|string|max:255|url',
             'api_key' => 'nullable|string',
             'embeddings_api_key' => 'nullable|string',
             'system_prompt' => 'nullable|string|max:4000',
@@ -55,8 +57,13 @@ class AiController extends Controller
         $accountId = $request->user()->account_id;
         $existing = AiConfig::forAccount($accountId)->first();
 
-        if (! $existing && empty($validated['api_key'])) {
+        // Ollama corre local y no requiere clave; los demás sí.
+        if ($validated['provider'] !== 'ollama' && ! $existing && empty($validated['api_key'])) {
             return back()->withErrors(['api_key' => 'La API key es obligatoria.']);
+        }
+
+        if ($validated['provider'] === 'ollama' && empty($validated['base_url'])) {
+            $validated['base_url'] = 'http://127.0.0.1:11434';
         }
 
         if (empty($validated['api_key'])) {

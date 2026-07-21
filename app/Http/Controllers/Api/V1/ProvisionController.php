@@ -44,12 +44,20 @@ class ProvisionController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|string|lowercase|email|max:255',
             'password' => 'nullable|string|min:8|max:255',
+            // Fase 7 (equipo centralizado del hub): permite unir el user a una
+            // cuenta existente con un rol distinto de owner. `account_id` es
+            // el id LOCAL de la cuenta en ESTA app (el hub lo obtuvo al
+            // provisionar al owner). Si no llega, el user es owner de una
+            // cuenta nueva (comportamiento original).
+            'account_id' => 'nullable|uuid|exists:accounts,id',
+            'account_role' => 'nullable|in:owner,admin,agent,viewer',
             'api_key' => 'nullable|array',
             'api_key.name' => 'required_with:api_key|string|max:100',
             'api_key.scopes' => 'required_with:api_key|array|min:1',
             'api_key.scopes.*' => Rule::in([
                 'contacts:read', 'contacts:write', 'conversations:read',
                 'messages:write', 'broadcasts:read', 'broadcasts:write',
+                'notifications:read',
             ]),
             'webhook' => 'nullable|array',
             'webhook.url' => 'required_with:webhook|url|max:2048',
@@ -62,8 +70,10 @@ class ProvisionController extends Controller
         $userCreated = false;
 
         if (! $user) {
-            // Mismo flujo que el registro web: usuario owner de su cuenta.
-            $user = DB::transaction(function () use ($validated) {
+            $joinAccountId = $validated['account_id'] ?? null;
+            $role = $validated['account_role'] ?? User::ROLE_OWNER;
+
+            $user = DB::transaction(function () use ($validated, $joinAccountId, $role) {
                 $user = User::create([
                     'name' => $validated['name'],
                     'email' => $validated['email'],
@@ -73,12 +83,18 @@ class ProvisionController extends Controller
                     'email_verified_at' => now(),
                 ]);
 
-                $account = Account::create([
-                    'name' => $validated['name'],
-                    'owner_user_id' => $user->id,
-                ]);
+                // Se une a una cuenta existente (miembro invitado por el hub)
+                // o crea la suya como owner (comportamiento clásico).
+                if ($joinAccountId) {
+                    $user->update(['account_id' => $joinAccountId, 'account_role' => $role]);
+                } else {
+                    $account = Account::create([
+                        'name' => $validated['name'],
+                        'owner_user_id' => $user->id,
+                    ]);
 
-                $user->update(['account_id' => $account->id, 'account_role' => User::ROLE_OWNER]);
+                    $user->update(['account_id' => $account->id, 'account_role' => User::ROLE_OWNER]);
+                }
 
                 return $user;
             });

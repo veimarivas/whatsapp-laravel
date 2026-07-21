@@ -1,9 +1,10 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, usePage } from '@inertiajs/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Recorder from 'opus-recorder';
+import encoderPath from 'opus-recorder/dist/encoderWorker.min.js?url';
 
-// Con Reverb activo los eventos llegan por WebSocket; el polling queda
-// como respaldo lento por si el servidor de WebSockets no está corriendo.
+// Reverb -> respaldo con polling lento
 const POLL_MS = 30000;
 
 function csrf() {
@@ -30,135 +31,297 @@ function timeAgo(iso) {
     if (diff < 60) return 'ahora';
     if (diff < 3600) return `${Math.floor(diff / 60)}m`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
     return new Date(iso).toLocaleDateString();
 }
 
-const STATUS_LABELS = { open: 'Abierta', pending: 'Pendiente', closed: 'Cerrada' };
-const TICKS = { sending: '🕓', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' };
+function dayLabel(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const same = (a, b) => a.toDateString() === b.toDateString();
+    if (same(d, today)) return 'Hoy';
+    if (same(d, yesterday)) return 'Ayer';
+    return d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+}
 
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '🙏'];
+const STATUS_LABELS = { open: 'Abierta', pending: 'Pendiente', closed: 'Cerrada' };
+const STATUS_META = {
+    open: { dot: 'bg-emerald-500', ring: 'ring-emerald-200', text: 'text-emerald-700', bg: 'bg-emerald-50' },
+    pending: { dot: 'bg-amber-500', ring: 'ring-amber-200', text: 'text-amber-700', bg: 'bg-amber-50' },
+    closed: { dot: 'bg-gray-400', ring: 'ring-gray-200', text: 'text-gray-600', bg: 'bg-gray-100' },
+};
+const TICKS = { sending: '🕓', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' };
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '🙏', '🔥', '😊', '👏'];
+
+const AVATAR_COLORS = [
+    'from-emerald-500 to-teal-600',
+    'from-blue-500 to-indigo-600',
+    'from-purple-500 to-pink-600',
+    'from-amber-500 to-orange-600',
+    'from-rose-500 to-red-600',
+    'from-cyan-500 to-sky-600',
+    'from-lime-500 to-green-600',
+    'from-fuchsia-500 to-purple-600',
+];
+
+function avatarFor(name) {
+    const label = (name || '?').trim();
+    const initials = label
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase() || '?';
+    let hash = 0;
+    for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) | 0;
+    const gradient = AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+    return { initials, gradient };
+}
+
+function Avatar({ name, size = 'md', online }) {
+    const { initials, gradient } = avatarFor(name);
+    const sizes = {
+        sm: 'w-8 h-8 text-xs',
+        md: 'w-10 h-10 text-sm',
+        lg: 'w-12 h-12 text-base',
+        xl: 'w-16 h-16 text-lg',
+    };
+    return (
+        <div className="relative shrink-0">
+            <div className={`${sizes[size]} rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center font-bold text-white shadow-sm`}>
+                {initials}
+            </div>
+            {online && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />}
+        </div>
+    );
+}
+
+function StatusBadge({ status }) {
+    const meta = STATUS_META[status] ?? STATUS_META.open;
+    return (
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ring-1 ${meta.ring} ${meta.text} ${meta.bg}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+            {STATUS_LABELS[status] ?? status}
+        </span>
+    );
+}
 
 function MessageBubble({ msg, onReply, onReact }) {
     const isCustomer = msg.sender_type === 'customer';
     const [showEmojis, setShowEmojis] = useState(false);
     return (
-        <div className={`group flex items-center gap-1 ${isCustomer ? 'justify-start' : 'justify-end'}`}>
+        <div className={`group flex items-end gap-2 ${isCustomer ? 'justify-start' : 'justify-end'}`}>
             {!isCustomer && msg.message_id && (
-                <BubbleActions
-                    onReply={() => onReply(msg)}
-                    showEmojis={showEmojis}
-                    setShowEmojis={setShowEmojis}
-                    onReact={(e) => onReact(msg, e)}
-                />
+                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="left" />
             )}
             <div
-                className={`max-w-[70%] rounded-lg px-3 py-2 text-sm shadow-sm ${
-                    isCustomer ? 'bg-white text-gray-900' : 'bg-emerald-600 text-white'
+                className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
+                    isCustomer
+                        ? 'bg-white text-gray-900 rounded-bl-md border border-gray-100'
+                        : 'bg-gradient-to-br from-[#045474] to-[#1c486c] text-white rounded-br-md shadow-md shadow-[#045474]/20'
                 }`}
             >
                 {msg.reply_to && (
                     <div
-                        className={`mb-1 rounded border-l-2 px-2 py-1 text-xs ${
+                        className={`mb-1.5 rounded-lg border-l-4 px-2 py-1.5 text-xs ${
                             isCustomer
-                                ? 'border-emerald-500 bg-gray-50 text-gray-500'
-                                : 'border-white/60 bg-emerald-700/60 text-emerald-50'
+                                ? 'border-[#045474] bg-gray-50 text-gray-600'
+                                : 'border-white/80 bg-white/10 text-white/90'
                         }`}
                     >
-                        {msg.reply_to.content_text || `[${msg.reply_to.content_type}]`}
+                        <p className="opacity-60 text-[10px] font-semibold uppercase mb-0.5">Respondiendo</p>
+                        <p className="truncate">{msg.reply_to.content_text || `[${msg.reply_to.content_type}]`}</p>
                     </div>
                 )}
                 {msg.content_type === 'image' && msg.media_url && (
-                    <img
-                        src={`/whatsapp/media/${msg.media_url}`}
-                        alt=""
-                        className="mb-1 max-h-64 rounded"
-                    />
+                    <a href={`/whatsapp/media/${msg.media_url}`} target="_blank" rel="noreferrer">
+                        <img src={`/whatsapp/media/${msg.media_url}`} alt="" className="mb-1 max-h-64 rounded-lg" />
+                    </a>
+                )}
+                {msg.content_type === 'video' && msg.media_url && (
+                    <video controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1 max-h-64 rounded-lg" />
                 )}
                 {msg.content_type === 'audio' && msg.media_url && (
-                    <audio controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1" />
+                    <audio controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1 w-64 max-w-full" />
                 )}
                 {msg.content_type === 'document' && msg.media_url && (
                     <a
                         href={`/whatsapp/media/${msg.media_url}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="mb-1 block underline"
+                        className={`mb-1 flex items-center gap-2 rounded-lg px-2 py-1.5 underline ${isCustomer ? 'bg-gray-50' : 'bg-white/10'}`}
                     >
-                        📄 {msg.content_text || 'Documento'}
+                        <span>📄</span>
+                        <span className="truncate">{msg.content_text || 'Documento'}</span>
                     </a>
                 )}
                 {msg.content_text && msg.content_type !== 'document' && (
-                    <p className="whitespace-pre-wrap break-words">{msg.content_text}</p>
+                    <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.content_text}</p>
                 )}
-                <div
-                    className={`mt-1 flex items-center gap-1 text-[10px] ${
-                        isCustomer ? 'text-gray-400' : 'text-emerald-100'
-                    }`}
-                >
-                    <span>
-                        {new Date(msg.created_at).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                        })}
-                    </span>
-                    {!isCustomer && (
-                        <span className={msg.status === 'read' ? 'text-sky-200' : ''}>
-                            {TICKS[msg.status] ?? ''}
-                        </span>
-                    )}
+                <div className={`mt-1 flex items-center gap-1.5 text-[10px] ${isCustomer ? 'text-gray-400' : 'text-white/70'}`}>
+                    <span>{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    {!isCustomer && <span className={msg.status === 'read' ? 'text-sky-300 font-bold' : ''}>{TICKS[msg.status] ?? ''}</span>}
                     {msg.reactions?.length > 0 && (
-                        <span className="text-sm">{msg.reactions.map((r) => r.emoji).join('')}</span>
+                        <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-sm">{msg.reactions.map((r) => r.emoji).join('')}</span>
                     )}
                 </div>
             </div>
             {isCustomer && msg.message_id && (
-                <BubbleActions
-                    onReply={() => onReply(msg)}
-                    showEmojis={showEmojis}
-                    setShowEmojis={setShowEmojis}
-                    onReact={(e) => onReact(msg, e)}
-                />
+                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="right" />
             )}
         </div>
     );
 }
 
-function BubbleActions({ onReply, showEmojis, setShowEmojis, onReact }) {
+function BubbleActions({ onReply, showEmojis, setShowEmojis, onReact, side }) {
     return (
         <div className="relative flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-            <button
-                type="button"
-                onClick={onReply}
-                title="Responder citando"
-                className="rounded-full bg-white p-1 text-xs text-gray-500 shadow hover:text-gray-800"
-            >
-                ↩
+            <button type="button" onClick={onReply} title="Responder" className="rounded-full bg-white p-1.5 text-xs text-gray-500 shadow-md hover:text-[#045474] hover:scale-110 transition-all">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
             </button>
-            <button
-                type="button"
-                onClick={() => setShowEmojis(!showEmojis)}
-                title="Reaccionar"
-                className="rounded-full bg-white p-1 text-xs text-gray-500 shadow hover:text-gray-800"
-            >
-                🙂
+            <button type="button" onClick={() => setShowEmojis(!showEmojis)} title="Reaccionar" className="rounded-full bg-white p-1.5 text-xs text-gray-500 shadow-md hover:text-amber-500 hover:scale-110 transition-all">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
             </button>
             {showEmojis && (
-                <div className="absolute bottom-7 right-0 z-10 flex gap-1 rounded-full bg-white px-2 py-1 shadow-lg">
+                <div className={`absolute bottom-8 ${side === 'left' ? 'left-0' : 'right-0'} z-10 flex gap-1 rounded-full bg-white px-2 py-1.5 shadow-lg border border-gray-100`}>
                     {QUICK_EMOJIS.map((emoji) => (
-                        <button
-                            key={emoji}
-                            type="button"
-                            onClick={() => {
-                                onReact(emoji);
-                                setShowEmojis(false);
-                            }}
-                            className="text-base hover:scale-125"
-                        >
+                        <button key={emoji} type="button" onClick={() => { onReact(emoji); setShowEmojis(false); }} className="text-base hover:scale-125 transition-transform">
                             {emoji}
                         </button>
                     ))}
                 </div>
             )}
+        </div>
+    );
+}
+
+/** Grabador de voz: opus-recorder produce ogg/opus (formato requerido por Meta). */
+function VoiceRecorder({ onSend, onCancel, disabled }) {
+    const [state, setState] = useState('idle'); // idle | recording | preview | sending
+    const [seconds, setSeconds] = useState(0);
+    const [blob, setBlob] = useState(null);
+    const [error, setError] = useState(null);
+    const recRef = useRef(null);
+    const timerRef = useRef(null);
+
+    const start = async () => {
+        setError(null);
+        try {
+            const rec = new Recorder({
+                encoderPath,
+                encoderApplication: 2049, // VOIP
+                encoderSampleRate: 48000,
+                originalSampleRateOverride: 48000,
+                numberOfChannels: 1,
+                streamPages: false,
+            });
+            rec.ondataavailable = (data) => {
+                const b = new Blob([data], { type: 'audio/ogg' });
+                setBlob(b);
+                setState('preview');
+            };
+            await rec.start();
+            recRef.current = rec;
+            setState('recording');
+            setSeconds(0);
+            timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+        } catch (e) {
+            setError('No se pudo acceder al micrófono. Revisa los permisos.');
+            setState('idle');
+        }
+    };
+
+    const stop = async () => {
+        clearInterval(timerRef.current);
+        if (recRef.current) {
+            await recRef.current.stop();
+            recRef.current = null;
+        }
+    };
+
+    const discard = () => {
+        setBlob(null);
+        setSeconds(0);
+        setState('idle');
+        onCancel?.();
+    };
+
+    const send = async () => {
+        if (!blob) return;
+        setState('sending');
+        try {
+            const file = new File([blob], `voz-${Date.now()}.ogg`, { type: 'audio/ogg' });
+            await onSend(file);
+            discard();
+        } catch (e) {
+            setError(e.message || 'Error al enviar');
+            setState('preview');
+        }
+    };
+
+    useEffect(() => () => {
+        clearInterval(timerRef.current);
+        recRef.current?.stop().catch(() => {});
+    }, []);
+
+    const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+    const ss = String(seconds % 60).padStart(2, '0');
+
+    if (state === 'idle') {
+        return (
+            <button
+                type="button"
+                onClick={start}
+                disabled={disabled}
+                title="Grabar mensaje de voz"
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-600 disabled:opacity-50 transition-all shadow-sm"
+            >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m-3 0h6M9 5a3 3 0 016 0v6a3 3 0 01-6 0V5z" />
+                </svg>
+            </button>
+        );
+    }
+
+    if (state === 'recording') {
+        return (
+            <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                </span>
+                <span className="text-sm font-mono font-bold text-rose-700">{mm}:{ss}</span>
+                <button type="button" onClick={discard} className="ml-1 px-2 py-1 text-xs text-rose-700 hover:bg-rose-100 rounded-lg">Cancelar</button>
+                <button type="button" onClick={stop} className="px-3 py-1.5 text-xs font-semibold bg-rose-600 text-white rounded-lg hover:bg-rose-700 shadow-sm">Detener</button>
+            </div>
+        );
+    }
+
+    // preview / sending
+    return (
+        <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
+            {blob && <audio controls src={URL.createObjectURL(blob)} className="h-9" />}
+            <button type="button" onClick={discard} disabled={state === 'sending'} className="px-2 py-1 text-xs text-gray-600 hover:bg-white rounded-lg">Descartar</button>
+            <button type="button" onClick={send} disabled={state === 'sending'} className="px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-[#045474] to-[#1c486c] text-white rounded-lg shadow-sm disabled:opacity-50">
+                {state === 'sending' ? 'Enviando…' : 'Enviar'}
+            </button>
+            {error && <span className="text-xs text-red-600">{error}</span>}
+        </div>
+    );
+}
+
+function DateSeparator({ label }) {
+    return (
+        <div className="flex items-center gap-3 py-2">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50 px-3 py-1 rounded-full">{label}</span>
+            <div className="flex-1 h-px bg-gray-200" />
         </div>
     );
 }
@@ -170,30 +333,39 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [error, setError] = useState(null);
+    const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [showContactPanel, setShowContactPanel] = useState(true);
+    const [replyTo, setReplyTo] = useState(null);
+    const [notes, setNotes] = useState([]);
+    const [noteDraft, setNoteDraft] = useState('');
+    const [uploading, setUploading] = useState(false);
+    const [drafting, setDrafting] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const bottomRef = useRef(null);
     const selectedRef = useRef(null);
+    const fileInputRef = useRef(null);
     selectedRef.current = selectedId;
 
     const selected = conversations.find((c) => c.id === selectedId);
+    const accountId = usePage().props.auth.user?.account_id;
 
     const loadConversations = useCallback(async () => {
         try {
             setConversations(await api(route('inbox.conversations')));
-        } catch {
-            /* siguiente poll */
-        }
+        } catch { /* siguiente poll */ }
     }, []);
 
     const loadMessages = useCallback(async (id) => {
         try {
             const data = await api(route('inbox.messages', id));
             if (selectedRef.current === id) setMessages(data);
-        } catch {
-            /* siguiente poll */
-        }
+        } catch { /* siguiente poll */ }
     }, []);
 
-    const accountId = usePage().props.auth.user?.account_id;
+    const loadNotes = async (id) => {
+        try { setNotes(await api(route('inbox.notes', id))); } catch {}
+    };
 
     useEffect(() => {
         loadConversations();
@@ -204,33 +376,44 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
         return () => clearInterval(t);
     }, [loadConversations, loadMessages]);
 
-    // Tiempo real: cualquier evento del inbox de la cuenta refresca la
-    // lista, y el hilo abierto solo si es la conversación afectada.
     useEffect(() => {
         if (!window.Echo || !accountId) return;
-        const channel = window.Echo.private(`account.${accountId}`).listen(
-            'InboxUpdated',
-            (e) => {
-                loadConversations();
-                if (selectedRef.current && (!e.conversation_id || e.conversation_id === selectedRef.current)) {
-                    loadMessages(selectedRef.current);
-                }
-            },
-        );
-        return () => {
-            window.Echo.leave(`account.${accountId}`);
-        };
+        window.Echo.private(`account.${accountId}`).listen('InboxUpdated', (e) => {
+            loadConversations();
+            if (selectedRef.current && (!e.conversation_id || e.conversation_id === selectedRef.current)) {
+                loadMessages(selectedRef.current);
+            }
+        });
+        return () => { window.Echo.leave(`account.${accountId}`); };
     }, [accountId, loadConversations, loadMessages]);
 
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages.length]);
+    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length]);
+
+    const filtered = useMemo(() => {
+        const s = search.trim().toLowerCase();
+        return conversations
+            .filter((c) => statusFilter === 'all' || c.status === statusFilter)
+            .filter((c) => {
+                if (!s) return true;
+                const name = (c.contact?.name || '').toLowerCase();
+                const phone = (c.contact?.phone || '').toLowerCase();
+                const last = (c.last_message_text || '').toLowerCase();
+                return name.includes(s) || phone.includes(s) || last.includes(s);
+            });
+    }, [conversations, search, statusFilter]);
+
+    const totals = useMemo(() => ({
+        all: conversations.length,
+        open: conversations.filter((c) => c.status === 'open').length,
+        pending: conversations.filter((c) => c.status === 'pending').length,
+        closed: conversations.filter((c) => c.status === 'closed').length,
+        unread: conversations.reduce((a, c) => a + (c.unread_count || 0), 0),
+    }), [conversations]);
 
     const openConversation = async (conv) => {
         setSelectedId(conv.id);
         setMessages([]);
         setReplyTo(null);
-        setShowNotes(false);
         await loadMessages(conv.id);
         loadNotes(conv.id);
         if (conv.unread_count > 0) {
@@ -239,17 +422,14 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     };
 
     const send = async (e) => {
-        e.preventDefault();
+        e?.preventDefault();
         if (!draft.trim() || sending || !selectedId) return;
         setSending(true);
         setError(null);
         try {
             await api(route('inbox.send', selectedId), {
                 method: 'POST',
-                body: JSON.stringify({
-                    text: draft.trim(),
-                    reply_to_message_id: replyTo?.id ?? null,
-                }),
+                body: JSON.stringify({ text: draft.trim(), reply_to_message_id: replyTo?.id ?? null }),
             });
             setDraft('');
             setReplyTo(null);
@@ -264,62 +444,33 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
 
     const setStatus = async (status) => {
         if (!selectedId) return;
-        await api(route('inbox.status', selectedId), {
-            method: 'PATCH',
-            body: JSON.stringify({ status }),
-        });
+        await api(route('inbox.status', selectedId), { method: 'PATCH', body: JSON.stringify({ status }) });
         loadConversations();
     };
 
     const assign = async (agentId) => {
         if (!selectedId) return;
-        await api(route('inbox.assign', selectedId), {
-            method: 'PATCH',
-            body: JSON.stringify({ agent_id: agentId || null }),
-        });
+        await api(route('inbox.assign', selectedId), { method: 'PATCH', body: JSON.stringify({ agent_id: agentId || null }) });
         loadConversations();
     };
 
-    const [replyTo, setReplyTo] = useState(null);
     const reactTo = async (msg, emoji) => {
         try {
-            await api(route('inbox.react', msg.id), {
-                method: 'POST',
-                body: JSON.stringify({ emoji }),
-            });
+            await api(route('inbox.react', msg.id), { method: 'POST', body: JSON.stringify({ emoji }) });
             await loadMessages(selectedId);
-        } catch (err) {
-            setError(err.message);
-        }
+        } catch (err) { setError(err.message); }
     };
 
-    const [showNotes, setShowNotes] = useState(false);
-    const [notes, setNotes] = useState([]);
-    const [noteDraft, setNoteDraft] = useState('');
-    const loadNotes = async (id) => {
-        try {
-            setNotes(await api(route('inbox.notes', id)));
-        } catch {
-            /* silencioso */
-        }
-    };
     const addNote = async (e) => {
         e.preventDefault();
         if (!noteDraft.trim() || !selectedId) return;
         try {
-            await api(route('inbox.notes.add', selectedId), {
-                method: 'POST',
-                body: JSON.stringify({ text: noteDraft.trim() }),
-            });
+            await api(route('inbox.notes.add', selectedId), { method: 'POST', body: JSON.stringify({ text: noteDraft.trim() }) });
             setNoteDraft('');
             await loadNotes(selectedId);
-        } catch (err) {
-            setError(err.message);
-        }
+        } catch (err) { setError(err.message); }
     };
 
-    const fileInputRef = useRef(null);
-    const [uploading, setUploading] = useState(false);
     const sendFile = async (file) => {
         if (!file || !selectedId || uploading) return;
         setUploading(true);
@@ -338,13 +489,13 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
             await loadConversations();
         } catch (err) {
             setError(err.message);
+            throw err;
         } finally {
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
 
-    const [drafting, setDrafting] = useState(false);
     const aiDraft = async () => {
         if (!selectedId || drafting) return;
         setDrafting(true);
@@ -352,207 +503,228 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
         try {
             const res = await api(route('inbox.ai-draft', selectedId), { method: 'POST' });
             setDraft(res.draft ?? '');
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setDrafting(false);
-        }
+        } catch (err) { setError(err.message); }
+        finally { setDrafting(false); }
     };
 
-    return (
-        <AuthenticatedLayout
-            header={
-                <h2 className="text-xl font-semibold leading-tight text-gray-800">Inbox</h2>
+    // Agrupa mensajes por día para renderizar con separadores
+    const messageGroups = useMemo(() => {
+        const groups = [];
+        let currentKey = null;
+        for (const m of messages) {
+            const key = new Date(m.created_at).toDateString();
+            if (key !== currentKey) {
+                groups.push({ label: dayLabel(m.created_at), items: [] });
+                currentKey = key;
             }
-        >
+            groups[groups.length - 1].items.push(m);
+        }
+        return groups;
+    }, [messages]);
+
+    return (
+        <AuthenticatedLayout header={<h2 className="text-lg font-semibold text-gray-900">Inbox</h2>}>
             <Head title="Inbox" />
 
-            <div className="mx-auto max-w-7xl px-4 py-6">
-                {!hasWhatsappConfig && (
-                    <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-                        WhatsApp no está conectado.{' '}
-                        <Link href={route('settings.whatsapp')} className="font-semibold underline">
-                            Configura tu número
-                        </Link>{' '}
-                        para enviar y recibir mensajes.
-                    </div>
-                )}
+            {!hasWhatsappConfig && (
+                <div className="mx-4 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 flex items-center gap-3 shadow-sm">
+                    <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span>WhatsApp no está conectado. <Link href={route('settings.whatsapp')} className="font-semibold underline">Configura tu número</Link> para enviar y recibir mensajes.</span>
+                </div>
+            )}
 
-                <div className="flex h-[calc(100vh-14rem)] overflow-hidden rounded-lg bg-white shadow">
-                    {/* Lista de conversaciones */}
-                    <div className="w-80 shrink-0 overflow-y-auto border-r">
-                        {conversations.length === 0 && (
-                            <p className="p-4 text-sm text-gray-500">
-                                Sin conversaciones todavía. Llegarán aquí cuando un cliente te
-                                escriba.
-                            </p>
-                        )}
-                        {conversations.map((conv) => (
-                            <button
-                                key={conv.id}
-                                onClick={() => openConversation(conv)}
-                                className={`block w-full border-b px-4 py-3 text-left hover:bg-gray-50 ${
-                                    selectedId === conv.id ? 'bg-emerald-50' : ''
-                                }`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <span className="truncate font-medium text-gray-900">
-                                        {conv.contact?.name || conv.contact?.phone || 'Desconocido'}
+            <div className="h-[calc(100vh-8rem)] p-4">
+                <div className="flex h-full overflow-hidden rounded-2xl bg-white shadow-sm border border-gray-100">
+                    {/* COLUMNA 1: lista de conversaciones */}
+                    <aside className="w-96 shrink-0 flex flex-col border-r border-gray-100 bg-gray-50/30">
+                        <div className="p-4 border-b border-gray-100 bg-white space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-bold text-gray-900">Conversaciones</h3>
+                                {totals.unread > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-500 to-red-500 text-white text-xs font-bold shadow-sm">
+                                        {totals.unread} sin leer
                                     </span>
-                                    <span className="ml-2 shrink-0 text-xs text-gray-400">
-                                        {timeAgo(conv.last_message_at)}
-                                    </span>
-                                </div>
-                                <div className="mt-0.5 flex items-center justify-between">
-                                    <span className="truncate text-sm text-gray-500">
-                                        {conv.last_message_text || '—'}
-                                    </span>
-                                    {conv.unread_count > 0 && (
-                                        <span className="ml-2 shrink-0 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
-                                            {conv.unread_count}
-                                        </span>
-                                    )}
-                                </div>
-                            </button>
-                        ))}
-                    </div>
+                                )}
+                            </div>
+                            <div className="relative">
+                                <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                                <input
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="Buscar por nombre, teléfono o mensaje…"
+                                    className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#045474]/20 focus:border-[#045474] focus:bg-white transition-all"
+                                />
+                            </div>
+                            <div className="flex gap-1 text-xs">
+                                {[
+                                    { k: 'all', l: 'Todas', n: totals.all },
+                                    { k: 'open', l: 'Abiertas', n: totals.open },
+                                    { k: 'pending', l: 'Pendientes', n: totals.pending },
+                                    { k: 'closed', l: 'Cerradas', n: totals.closed },
+                                ].map((f) => (
+                                    <button
+                                        key={f.k}
+                                        onClick={() => setStatusFilter(f.k)}
+                                        className={`flex-1 px-2 py-1.5 rounded-lg font-semibold transition-all ${
+                                            statusFilter === f.k
+                                                ? 'bg-gradient-to-br from-[#045474] to-[#1c486c] text-white shadow-md shadow-[#045474]/20'
+                                                : 'text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        {f.l} <span className="opacity-60">{f.n}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
 
-                    {/* Hilo de mensajes */}
-                    <div className="flex min-w-0 flex-1 flex-col bg-gray-100">
+                        <div className="flex-1 overflow-y-auto">
+                            {filtered.length === 0 && (
+                                <div className="p-8 text-center">
+                                    <div className="mx-auto w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                                        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                        </svg>
+                                    </div>
+                                    <p className="text-sm text-gray-500">
+                                        {search || statusFilter !== 'all' ? 'Sin coincidencias' : 'Sin conversaciones. Llegarán cuando un cliente te escriba.'}
+                                    </p>
+                                </div>
+                            )}
+                            {filtered.map((conv) => {
+                                const name = conv.contact?.name || conv.contact?.phone || 'Desconocido';
+                                const isActive = selectedId === conv.id;
+                                return (
+                                    <button
+                                        key={conv.id}
+                                        onClick={() => openConversation(conv)}
+                                        className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-all flex items-start gap-3 ${
+                                            isActive ? 'bg-gradient-to-r from-[#045474]/5 to-transparent border-l-4 border-l-[#045474]' : 'hover:bg-white'
+                                        }`}
+                                    >
+                                        <Avatar name={name} />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className={`truncate ${conv.unread_count > 0 ? 'font-bold text-gray-900' : 'font-semibold text-gray-700'}`}>{name}</span>
+                                                <span className="shrink-0 text-[11px] text-gray-400 font-medium">{timeAgo(conv.last_message_at)}</span>
+                                            </div>
+                                            <div className="mt-0.5 flex items-center justify-between gap-2">
+                                                <span className={`truncate text-sm ${conv.unread_count > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}>
+                                                    {conv.last_message_text || '—'}
+                                                </span>
+                                                {conv.unread_count > 0 && (
+                                                    <span className="ml-auto shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
+                                                        {conv.unread_count}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                                <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[conv.status]?.dot ?? 'bg-gray-300'}`} />
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{STATUS_LABELS[conv.status]}</span>
+                                                {conv.assigned_agent && (
+                                                    <span className="ml-auto text-[10px] text-gray-400 truncate">👤 {conv.assigned_agent.name}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </aside>
+
+                    {/* COLUMNA 2: chat */}
+                    <section className="flex min-w-0 flex-1 flex-col bg-gradient-to-b from-gray-50 to-gray-100">
                         {!selected ? (
-                            <div className="flex flex-1 items-center justify-center text-gray-400">
-                                Selecciona una conversación
+                            <div className="flex flex-1 items-center justify-center">
+                                <div className="text-center">
+                                    <div className="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-[#045474] to-[#1c486c] flex items-center justify-center shadow-lg shadow-[#045474]/30 mb-4">
+                                        <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                        </svg>
+                                    </div>
+                                    <p className="text-gray-700 font-semibold">Selecciona una conversación</p>
+                                    <p className="text-xs text-gray-400 mt-1">O espera a que un cliente te escriba</p>
+                                </div>
                             </div>
                         ) : (
                             <>
-                                <div className="flex items-center justify-between border-b bg-white px-4 py-3">
-                                    <div>
-                                        <p className="font-semibold text-gray-900">
-                                            {selected.contact?.name || selected.contact?.phone}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {selected.contact?.phone} ·{' '}
-                                            {STATUS_LABELS[selected.status] ?? selected.status}
-                                        </p>
+                                {/* Header del chat */}
+                                <header className="flex items-center justify-between border-b border-gray-100 bg-white px-4 py-3 shadow-sm">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <Avatar name={selected.contact?.name || selected.contact?.phone} size="lg" />
+                                        <div className="min-w-0">
+                                            <p className="font-bold text-gray-900 truncate">{selected.contact?.name || selected.contact?.phone}</p>
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                <span className="text-xs text-gray-500 font-mono">{selected.contact?.phone}</span>
+                                                <StatusBadge status={selected.status} />
+                                            </div>
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowNotes(!showNotes)}
-                                            title="Notas del contacto"
-                                            className={`rounded-md border px-2 py-1.5 text-sm ${
-                                                showNotes
-                                                    ? 'border-amber-400 bg-amber-50 text-amber-700'
-                                                    : 'border-gray-300 text-gray-500 hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            📝 {notes.length > 0 && notes.length}
-                                        </button>
                                         <select
                                             value={selected.assigned_agent_id ?? ''}
                                             onChange={(e) => assign(e.target.value)}
-                                            className="rounded-md border-gray-300 text-sm"
+                                            className="rounded-xl border-gray-200 text-sm bg-gray-50 focus:ring-[#045474] focus:border-[#045474]"
                                             title="Asignar agente"
                                         >
                                             <option value="">Sin asignar</option>
-                                            {members.map((m) => (
-                                                <option key={m.id} value={m.id}>
-                                                    {m.name}
-                                                </option>
-                                            ))}
+                                            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                                         </select>
                                         <select
                                             value={selected.status}
                                             onChange={(e) => setStatus(e.target.value)}
-                                            className="rounded-md border-gray-300 text-sm"
+                                            className="rounded-xl border-gray-200 text-sm bg-gray-50 focus:ring-[#045474] focus:border-[#045474]"
                                         >
-                                            {Object.entries(STATUS_LABELS).map(([v, l]) => (
-                                                <option key={v} value={v}>
-                                                    {l}
-                                                </option>
-                                            ))}
+                                            {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                                         </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowContactPanel(!showContactPanel)}
+                                            title={showContactPanel ? 'Ocultar panel' : 'Mostrar panel'}
+                                            className={`rounded-xl border p-2 transition-all ${showContactPanel ? 'border-[#045474] bg-[#045474]/5 text-[#045474]' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                                        >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        </button>
                                     </div>
-                                </div>
+                                </header>
 
-                                <div className="flex min-h-0 flex-1">
-                                    <div className="flex-1 space-y-2 overflow-y-auto p-4">
-                                        {messages.map((msg) => (
-                                            <MessageBubble
-                                                key={msg.id}
-                                                msg={msg}
-                                                onReply={setReplyTo}
-                                                onReact={reactTo}
-                                            />
-                                        ))}
-                                        <div ref={bottomRef} />
-                                    </div>
-
-                                    {showNotes && (
-                                        <div className="flex w-64 shrink-0 flex-col border-l bg-amber-50/50">
-                                            <p className="border-b bg-white px-3 py-2 text-xs font-semibold uppercase text-gray-500">
-                                                Notas internas
-                                            </p>
-                                            <div className="flex-1 space-y-2 overflow-y-auto p-3">
-                                                {notes.map((note) => (
-                                                    <div
-                                                        key={note.id}
-                                                        className="rounded-md bg-white p-2 text-xs shadow-sm"
-                                                    >
-                                                        <p className="whitespace-pre-wrap text-gray-700">
-                                                            {note.note_text}
-                                                        </p>
-                                                        <p className="mt-1 text-[10px] text-gray-400">
-                                                            {note.author?.name ?? '—'} ·{' '}
-                                                            {new Date(note.created_at).toLocaleDateString()}
-                                                        </p>
-                                                    </div>
-                                                ))}
-                                                {notes.length === 0 && (
-                                                    <p className="text-xs text-gray-400">
-                                                        Sin notas. Solo las ve tu equipo.
-                                                    </p>
-                                                )}
-                                            </div>
-                                            <form onSubmit={addNote} className="border-t bg-white p-2">
-                                                <textarea
-                                                    rows={2}
-                                                    value={noteDraft}
-                                                    onChange={(e) => setNoteDraft(e.target.value)}
-                                                    placeholder="Añadir nota…"
-                                                    className="block w-full rounded-md border-gray-300 text-xs"
-                                                />
-                                                <button
-                                                    type="submit"
-                                                    disabled={!noteDraft.trim()}
-                                                    className="mt-1 w-full rounded-md bg-amber-500 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-                                                >
-                                                    Guardar nota
-                                                </button>
-                                            </form>
+                                {/* Hilo de mensajes */}
+                                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                                    {messageGroups.map((g, gi) => (
+                                        <div key={gi} className="space-y-2">
+                                            <DateSeparator label={g.label} />
+                                            {g.items.map((msg) => (
+                                                <MessageBubble key={msg.id} msg={msg} onReply={setReplyTo} onReact={reactTo} />
+                                            ))}
                                         </div>
-                                    )}
+                                    ))}
+                                    <div ref={bottomRef} />
                                 </div>
 
-                                <form onSubmit={send} className="border-t bg-white p-3">
+                                {/* Composer */}
+                                <form onSubmit={send} className="border-t border-gray-100 bg-white p-4">
                                     {error && (
-                                        <p className="mb-2 text-sm text-red-600">{error}</p>
+                                        <div className="mb-3 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                                            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M12 21a9 9 0 100-18 9 9 0 000 18z" /></svg>
+                                            <span className="flex-1">{error}</span>
+                                            <button type="button" onClick={() => setError(null)} className="text-red-500 hover:text-red-700">×</button>
+                                        </div>
                                     )}
                                     {replyTo && (
-                                        <div className="mb-2 flex items-center justify-between rounded-md border-l-4 border-emerald-500 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
-                                            <span className="truncate">
-                                                ↩ Respondiendo a: {replyTo.content_text || `[${replyTo.content_type}]`}
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setReplyTo(null)}
-                                                className="ml-2 shrink-0 text-gray-400 hover:text-gray-700"
-                                            >
-                                                ×
-                                            </button>
+                                        <div className="mb-3 flex items-center justify-between rounded-xl border-l-4 border-[#045474] bg-gray-50 px-3 py-2 text-xs">
+                                            <div className="min-w-0">
+                                                <p className="font-semibold text-[#045474] uppercase text-[10px] tracking-wider">Respondiendo</p>
+                                                <p className="truncate text-gray-600 mt-0.5">{replyTo.content_text || `[${replyTo.content_type}]`}</p>
+                                            </div>
+                                            <button type="button" onClick={() => setReplyTo(null)} className="ml-2 shrink-0 w-6 h-6 rounded-full hover:bg-gray-200 text-gray-500 flex items-center justify-center">×</button>
                                         </div>
                                     )}
-                                    <div className="flex gap-2">
+                                    <div className="flex items-end gap-2">
                                         <input
                                             ref={fileInputRef}
                                             type="file"
@@ -565,40 +737,140 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                             onClick={() => fileInputRef.current?.click()}
                                             disabled={!hasWhatsappConfig || uploading}
                                             title="Adjuntar archivo"
-                                            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                            className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all shadow-sm"
                                         >
-                                            {uploading ? '…' : '📎'}
+                                            {uploading ? (
+                                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+                                            ) : (
+                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                </svg>
+                                            )}
                                         </button>
-                                        <input
-                                            value={draft}
-                                            onChange={(e) => setDraft(e.target.value)}
-                                            placeholder="Escribe un mensaje…"
-                                            className="flex-1 rounded-md border-gray-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                                            disabled={!hasWhatsappConfig || sending}
-                                        />
+
+                                        <VoiceRecorder onSend={sendFile} disabled={!hasWhatsappConfig} />
+
+                                        <div className="relative flex-1">
+                                            <textarea
+                                                value={draft}
+                                                onChange={(e) => setDraft(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                                                }}
+                                                placeholder="Escribe un mensaje…"
+                                                rows={1}
+                                                className="w-full resize-none px-4 py-2.5 pr-10 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#045474]/20 focus:border-[#045474] focus:bg-white transition-all max-h-32"
+                                                disabled={!hasWhatsappConfig || sending}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-amber-500 p-1"
+                                                title="Emoji"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                            </button>
+                                            {showEmojiPicker && (
+                                                <div className="absolute bottom-14 right-0 z-10 flex flex-wrap gap-1 rounded-xl bg-white p-2 shadow-xl border border-gray-100 w-64">
+                                                    {['😀','😁','😂','🤣','😊','😍','🤔','😎','😢','😡','👍','👎','❤️','🔥','🎉','🙏','👏','💯','✅','❌'].map((e) => (
+                                                        <button key={e} type="button" onClick={() => { setDraft(draft + e); setShowEmojiPicker(false); }} className="text-lg hover:scale-125 transition-transform p-1">{e}</button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
                                         {hasAi && (
                                             <button
                                                 type="button"
                                                 onClick={aiDraft}
                                                 disabled={drafting}
                                                 title="Generar borrador con IA"
-                                                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                                                className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-purple-50 px-3 py-2.5 text-sm font-semibold text-violet-700 hover:from-violet-100 hover:to-purple-100 disabled:opacity-50 transition-all shadow-sm flex items-center gap-1.5"
                                             >
-                                                {drafting ? '…' : '✨ IA'}
+                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                                </svg>
+                                                {drafting ? '…' : 'IA'}
                                             </button>
                                         )}
                                         <button
                                             type="submit"
                                             disabled={!hasWhatsappConfig || sending || !draft.trim()}
-                                            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-br from-[#045474] to-[#1c486c] hover:from-[#056090] hover:to-[#1c486c] disabled:opacity-50 transition-all shadow-lg shadow-[#045474]/20 flex items-center gap-1.5"
                                         >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                            </svg>
                                             Enviar
                                         </button>
                                     </div>
                                 </form>
                             </>
                         )}
-                    </div>
+                    </section>
+
+                    {/* COLUMNA 3: panel del contacto */}
+                    {selected && showContactPanel && (
+                        <aside className="w-80 shrink-0 border-l border-gray-100 bg-white flex flex-col overflow-y-auto">
+                            <div className="p-5 text-center border-b border-gray-100 bg-gradient-to-br from-[#045474]/5 to-transparent">
+                                <div className="mx-auto mb-3">
+                                    <Avatar name={selected.contact?.name || selected.contact?.phone} size="xl" />
+                                </div>
+                                <p className="font-bold text-gray-900">{selected.contact?.name || 'Sin nombre'}</p>
+                                <p className="text-sm text-gray-500 font-mono mt-0.5">{selected.contact?.phone}</p>
+                                {selected.contact?.email && <p className="text-xs text-gray-400 mt-1">{selected.contact.email}</p>}
+                                <div className="mt-3 flex justify-center">
+                                    <StatusBadge status={selected.status} />
+                                </div>
+                            </div>
+
+                            {/* Notas internas */}
+                            <div className="p-4 border-b border-gray-100">
+                                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2 flex items-center gap-1.5">
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                    Notas internas
+                                </p>
+                                <div className="space-y-2 max-h-48 overflow-y-auto mb-2">
+                                    {notes.map((n) => (
+                                        <div key={n.id} className="rounded-lg bg-amber-50 border border-amber-100 p-2.5">
+                                            <p className="text-xs text-gray-700 whitespace-pre-wrap">{n.note_text}</p>
+                                            <p className="text-[10px] text-gray-400 mt-1">{n.author?.name ?? '—'} · {new Date(n.created_at).toLocaleDateString()}</p>
+                                        </div>
+                                    ))}
+                                    {notes.length === 0 && <p className="text-xs text-gray-400 italic">Sin notas. Solo las ve tu equipo.</p>}
+                                </div>
+                                <form onSubmit={addNote} className="space-y-2">
+                                    <textarea
+                                        rows={2}
+                                        value={noteDraft}
+                                        onChange={(e) => setNoteDraft(e.target.value)}
+                                        placeholder="Añadir nota…"
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                                    />
+                                    <button type="submit" disabled={!noteDraft.trim()} className="w-full px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 shadow-sm">
+                                        Guardar nota
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* Metadatos de la conversación */}
+                            <div className="p-4 space-y-3 text-xs">
+                                <div>
+                                    <p className="font-bold uppercase tracking-wider text-gray-500 mb-1.5">Conversación</p>
+                                    <dl className="space-y-1.5">
+                                        <div className="flex justify-between"><dt className="text-gray-400">Creada</dt><dd className="text-gray-700 font-medium">{new Date(selected.created_at).toLocaleDateString()}</dd></div>
+                                        <div className="flex justify-between"><dt className="text-gray-400">Último mensaje</dt><dd className="text-gray-700 font-medium">{timeAgo(selected.last_message_at)}</dd></div>
+                                        <div className="flex justify-between"><dt className="text-gray-400">Agente</dt><dd className="text-gray-700 font-medium">{selected.assigned_agent?.name ?? 'Sin asignar'}</dd></div>
+                                    </dl>
+                                </div>
+                                <div className="pt-3 border-t border-gray-100">
+                                    <Link href={route('contacts.index')} className="text-xs text-[#045474] font-semibold hover:underline flex items-center gap-1">
+                                        Ver ficha completa del contacto →
+                                    </Link>
+                                </div>
+                            </div>
+                        </aside>
+                    )}
                 </div>
             </div>
         </AuthenticatedLayout>

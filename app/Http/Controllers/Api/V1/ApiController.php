@@ -178,6 +178,41 @@ class ApiController extends Controller
         return response()->json($broadcast, 201);
     }
 
+    /**
+     * Notificaciones in-app del user que emitió la API key en uso.
+     * Consumido por el Komo Hub (Fase 5) para consolidar notifs de las
+     * 3 apps en una sola campana. Shape normalizado con `link_path` para
+     * armar deep-links desde el hub.
+     */
+    public function notifications(Request $request): JsonResponse
+    {
+        $key = $request->attributes->get('api_key');
+        $accountId = $this->accountId($request);
+        $userId = $key->created_by; // notifs del user "dueño" de la key (el hub)
+
+        $query = \App\Models\Notification::forAccount($accountId)
+            ->when($userId, fn ($q) => $q->where('user_id', $userId))
+            ->when($request->query('since'), fn ($q, $since) => $q->where('created_at', '>=', $since))
+            ->orderByDesc('created_at')
+            ->limit(min((int) $request->query('limit', 50), 200));
+
+        $items = $query->get()->map(fn ($n) => [
+            'id' => $n->id,
+            'type' => $n->type,
+            'title' => $n->title,
+            'body' => $n->body,
+            // El deep-link natural: la conversación en el inbox; sino, la
+            // página de notificaciones (patrón común para las 3 apps).
+            'link_path' => $n->conversation_id
+                ? '/inbox?conversation='.$n->conversation_id
+                : '/notifications',
+            'created_at' => $n->created_at->toIso8601String(),
+            'read_at' => $n->read_at?->toIso8601String(),
+        ]);
+
+        return response()->json(['data' => $items]);
+    }
+
     /** Envía un texto a un teléfono (crea contacto/conversación si no existen). */
     public function sendMessage(Request $request, Messenger $messenger): JsonResponse
     {

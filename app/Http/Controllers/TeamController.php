@@ -219,6 +219,7 @@ class TeamController extends Controller
             'scopes.*' => Rule::in([
                 'contacts:read', 'contacts:write', 'conversations:read',
                 'messages:write', 'broadcasts:read', 'broadcasts:write',
+                'notifications:read',
             ]),
         ]);
 

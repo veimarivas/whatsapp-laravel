@@ -6,9 +6,16 @@ Port completo de **wacrm** (CRM de WhatsApp original en Next.js 16 + Supabase, e
 
 Suite de tests: **82 tests / 418 aserciones en verde** (`php artisan test`).
 
+Ronda 9 — Equipo centralizado (2026-07-19, Fase 7 del Komo Hub) — suite 90/90 (474):
+- **`ProvisionController` extendido**: acepta `account_id` (existente) + `account_role` (`owner|admin|agent|viewer`). Si llegan, el user se une a la cuenta remota con ese rol (patrón MemberProvisioner del hub); si no, comportamiento original (owner de cuenta nueva). Test `ProvisionMemberTest`.
+
+Ronda 8 — Notificaciones consolidadas (2026-07-19, Fase 5 del Komo Hub) — suite 89/89 (468):
+- **`GET /api/v1/notifications`** con nuevo scope `notifications:read` (agregado a `ApiKey::SCOPES` — TeamController y ProvisionController validan el scope nuevo). Devuelve `{data:[{id,type,title,body,link_path,created_at,read_at}]}` filtrado por el `created_by` de la key (el user "hub"), con `?since=` y `?limit=`. `link_path` = `/inbox?conversation={id}` o `/notifications`. Test en `NotificationsApiTest`.
+- **`SsoController@consume` acepta `?next=`** (path relativo, misma-host): tras el login redirige a la ruta destino en vez del dashboard. El hub encadena el salto con la ruta del deep-link — un solo clic desde la campana consolidada aterriza al usuario en la conversación exacta ya logueado.
+
 Ronda 7 — Provisión del ecosistema (2026-07-16, Fase 3 del Komo Hub) — suite 88/88 (463):
 - **`POST /api/v1/provision`** (`Api\V1\ProvisionController`, sin api.key): firmado HMAC del body con `HUB_PROVISION_SECRET` (`.env` + `services.hub.provision_secret`, mismo valor en las 4 apps). Crea user+account (idempotente por email; password aleatoria si no llega — acceso vía SSO), emite API key con los scopes pedidos y registra/actualiza el webhook saliente hacia el komo (URL+secret que manda el hub). Tests en `ProvisionTest`.
-- ⚠️ Pendiente de revisión: bajo `php artisan serve` este endpoint devolvió 404 en el e2e aunque `route:list` lo muestra y los tests pasan (se limpió route/config cache; no era puerto ocupado). Sospecha: OPcache CLI. Ver CLAUDE.md del hub.
+- ✅ e2e verificado (2026-07-19): el 404 intermitente que aparecía en pruebas locales anteriores era por procesos `php artisan serve` huérfanos escuchando el mismo puerto — matarlos con `Stop-Process` antes de levantar. Aprovisionamiento completo 7/7 pasos OK.
 
 Ronda 6 — SSO del ecosistema (2026-07-16, Fase 2 del Komo Hub en `C:\xampp_82_12\htdocs\laravel_nuevo_proyecto`):
 - **`SsoController@consume`** (ruta pública `GET /sso/consume`, `APP_ID='wacrm'`): acepta tokens de un solo uso del hub — firma HMAC (`HUB_SSO_SECRET` en `.env` y `services.hub.sso_secret`, mismo valor en las 4 apps), expiración 60s, nonce anti-replay en cache. Login por email + regenerate → dashboard.
