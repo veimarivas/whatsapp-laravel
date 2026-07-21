@@ -49,9 +49,14 @@ class DashboardController extends Controller
                 'unreadTotal' => (int) Conversation::forAccount($accountId)->sum('unread_count'),
                 'pipelineValue' => (float) Deal::forAccount($accountId)->where('status', 'open')->sum('value'),
                 'dealsWon' => Deal::forAccount($accountId)->where('status', 'won')->count(),
-                'broadcastsSent' => Broadcast::forAccount($accountId)->where('status', 'sent')->count(),
-                'activeAutomations' => Automation::forAccount($accountId)->where('is_active', true)->count(),
-                'activeFlows' => Flow::forAccount($accountId)->where('status', 'active')->count(),
+                'broadcasts' => Broadcast::forAccount($accountId)->where('status', 'sent')->count(),
+                'automations' => Automation::forAccount($accountId)->where('is_active', true)->count(),
+                'flows' => Flow::forAccount($accountId)->where('status', 'active')->count(),
+                'pending' => Conversation::forAccount($accountId)->where('status', 'pending')->count(),
+                'aiReplies' => Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+                    ->where('sender_type', 'bot')
+                    ->where('messages.created_at', '>=', now()->subDays(6)->startOfDay())
+                    ->count(),
             ],
             'chart' => $chart,
             'recentConversations' => Conversation::forAccount($accountId)

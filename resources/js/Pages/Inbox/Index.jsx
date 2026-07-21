@@ -568,23 +568,24 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                     className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#045474]/20 focus:border-[#045474] focus:bg-white transition-all"
                                 />
                             </div>
-                            <div className="flex gap-1 text-xs">
+                            <div className="grid grid-cols-4 gap-1 text-[11px]">
                                 {[
                                     { k: 'all', l: 'Todas', n: totals.all },
                                     { k: 'open', l: 'Abiertas', n: totals.open },
-                                    { k: 'pending', l: 'Pendientes', n: totals.pending },
-                                    { k: 'closed', l: 'Cerradas', n: totals.closed },
+                                    { k: 'pending', l: 'Pend.', n: totals.pending },
+                                    { k: 'closed', l: 'Cerr.', n: totals.closed },
                                 ].map((f) => (
                                     <button
                                         key={f.k}
                                         onClick={() => setStatusFilter(f.k)}
-                                        className={`flex-1 px-2 py-1.5 rounded-lg font-semibold transition-all ${
+                                        className={`flex flex-col items-center justify-center px-1 py-1.5 rounded-lg font-semibold transition-all ${
                                             statusFilter === f.k
                                                 ? 'bg-gradient-to-br from-[#045474] to-[#1c486c] text-white shadow-md shadow-[#045474]/20'
                                                 : 'text-gray-600 hover:bg-gray-100'
                                         }`}
                                     >
-                                        {f.l} <span className="opacity-60">{f.n}</span>
+                                        <span>{f.l}</span>
+                                        <span className={`text-[10px] font-bold ${statusFilter === f.k ? 'text-white/80' : 'text-gray-400'}`}>{f.n}</span>
                                     </button>
                                 ))}
                             </div>
@@ -851,12 +852,12 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                     {selected && showContactPanel && (
                         <aside className="w-80 shrink-0 border-l border-gray-100 bg-white flex flex-col overflow-y-auto">
                             <div className="p-5 text-center border-b border-gray-100 bg-gradient-to-br from-[#045474]/5 to-transparent">
-                                <div className="mx-auto mb-3">
+                                <div className="mx-auto mb-3 flex justify-center">
                                     <Avatar name={selected.contact?.name || selected.contact?.phone} size="xl" />
                                 </div>
-                                <p className="font-bold text-gray-900">{selected.contact?.name || 'Sin nombre'}</p>
-                                <p className="text-sm text-gray-500 font-mono mt-0.5">{selected.contact?.phone}</p>
-                                {selected.contact?.email && <p className="text-xs text-gray-400 mt-1">{selected.contact.email}</p>}
+                                <p className="font-bold text-gray-900 truncate px-2">{selected.contact?.name || 'Sin nombre'}</p>
+                                <p className="text-sm text-gray-500 font-mono mt-0.5 truncate px-2">{selected.contact?.phone}</p>
+                                {selected.contact?.email && <p className="text-xs text-gray-400 mt-1 truncate px-2">{selected.contact.email}</p>}
                                 <div className="mt-3 flex justify-center">
                                     <StatusBadge status={selected.status} />
                                 </div>
