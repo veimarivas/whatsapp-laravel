@@ -326,6 +326,16 @@ function DateSeparator({ label }) {
     );
 }
 
+function TypingDots({ compact }) {
+    return (
+        <span className={`inline-flex items-center gap-0.5 ${compact ? '' : 'ml-1'}`}>
+            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+        </span>
+    );
+}
+
 export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [conversations, setConversations] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
@@ -342,13 +352,18 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [uploading, setUploading] = useState(false);
     const [drafting, setDrafting] = useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [typingByConv, setTypingByConv] = useState({});
     const bottomRef = useRef(null);
     const selectedRef = useRef(null);
     const fileInputRef = useRef(null);
+    const channelRef = useRef(null);
+    const lastWhisperRef = useRef(0);
+    const typingStopRef = useRef(null);
     selectedRef.current = selectedId;
 
     const selected = conversations.find((c) => c.id === selectedId);
-    const accountId = usePage().props.auth.user?.account_id;
+    const me = usePage().props.auth.user;
+    const accountId = me?.account_id;
 
     const loadConversations = useCallback(async () => {
         try {
@@ -378,14 +393,68 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
 
     useEffect(() => {
         if (!window.Echo || !accountId) return;
-        window.Echo.private(`account.${accountId}`).listen('InboxUpdated', (e) => {
+        const channel = window.Echo.private(`account.${accountId}`);
+        channelRef.current = channel;
+        channel.listen('InboxUpdated', (e) => {
             loadConversations();
             if (selectedRef.current && (!e.conversation_id || e.conversation_id === selectedRef.current)) {
                 loadMessages(selectedRef.current);
             }
         });
-        return () => { window.Echo.leave(`account.${accountId}`); };
-    }, [accountId, loadConversations, loadMessages]);
+        channel.listenForWhisper('typing', (e) => {
+            if (!e || e.user_id === me?.id) return; // ignoro mi propio whisper
+            setTypingByConv((prev) => ({
+                ...prev,
+                [e.conversation_id]: { userId: e.user_id, name: e.name, expiresAt: Date.now() + 4000 },
+            }));
+        });
+        channel.listenForWhisper('stopped', (e) => {
+            if (!e) return;
+            setTypingByConv((prev) => {
+                const next = { ...prev };
+                delete next[e.conversation_id];
+                return next;
+            });
+        });
+        // Limpia entradas expiradas cada segundo (por si el whisper de "stopped" se pierde).
+        const gc = setInterval(() => {
+            setTypingByConv((prev) => {
+                const now = Date.now();
+                const next = {};
+                let changed = false;
+                for (const [k, v] of Object.entries(prev)) {
+                    if (v.expiresAt > now) next[k] = v; else changed = true;
+                }
+                return changed ? next : prev;
+            });
+        }, 1000);
+        return () => {
+            clearInterval(gc);
+            window.Echo.leave(`account.${accountId}`);
+            channelRef.current = null;
+        };
+    }, [accountId, loadConversations, loadMessages, me?.id]);
+
+    /** Anuncia que este agente está escribiendo en la conversación abierta (throttle 2s). */
+    const announceTyping = useCallback(() => {
+        if (!channelRef.current || !selectedRef.current || !me) return;
+        const now = Date.now();
+        if (now - lastWhisperRef.current > 2000) {
+            channelRef.current.whisper('typing', {
+                conversation_id: selectedRef.current,
+                user_id: me.id,
+                name: me.name,
+            });
+            lastWhisperRef.current = now;
+        }
+        clearTimeout(typingStopRef.current);
+        typingStopRef.current = setTimeout(() => {
+            if (channelRef.current && selectedRef.current) {
+                channelRef.current.whisper('stopped', { conversation_id: selectedRef.current, user_id: me.id });
+            }
+            lastWhisperRef.current = 0;
+        }, 3000);
+    }, [me]);
 
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length]);
 
@@ -607,6 +676,7 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                             {filtered.map((conv) => {
                                 const name = conv.contact?.name || conv.contact?.phone || 'Desconocido';
                                 const isActive = selectedId === conv.id;
+                                const typing = typingByConv[conv.id];
                                 return (
                                     <button
                                         key={conv.id}
@@ -622,9 +692,15 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                                 <span className="shrink-0 text-[11px] text-gray-400 font-medium">{timeAgo(conv.last_message_at)}</span>
                                             </div>
                                             <div className="mt-0.5 flex items-center justify-between gap-2">
-                                                <span className={`truncate text-sm ${conv.unread_count > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}>
-                                                    {conv.last_message_text || '—'}
-                                                </span>
+                                                {typing ? (
+                                                    <span className="truncate text-sm text-emerald-600 font-medium flex items-center gap-1.5">
+                                                        <TypingDots compact /> escribiendo…
+                                                    </span>
+                                                ) : (
+                                                    <span className={`truncate text-sm ${conv.unread_count > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}>
+                                                        {conv.last_message_text || '—'}
+                                                    </span>
+                                                )}
                                                 {conv.unread_count > 0 && (
                                                     <span className="ml-auto shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
                                                         {conv.unread_count}
@@ -668,8 +744,16 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                         <div className="min-w-0">
                                             <p className="font-bold text-gray-900 truncate">{selected.contact?.name || selected.contact?.phone}</p>
                                             <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-xs text-gray-500 font-mono">{selected.contact?.phone}</span>
-                                                <StatusBadge status={selected.status} />
+                                                {typingByConv[selected.id] ? (
+                                                    <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5">
+                                                        <TypingDots compact /> {typingByConv[selected.id].name} está escribiendo…
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-xs text-gray-500 font-mono">{selected.contact?.phone}</span>
+                                                        <StatusBadge status={selected.status} />
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -792,7 +876,7 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                         <div className="relative flex-1">
                                             <textarea
                                                 value={draft}
-                                                onChange={(e) => setDraft(e.target.value)}
+                                                onChange={(e) => { setDraft(e.target.value); if (e.target.value) announceTyping(); }}
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
                                                 }}
