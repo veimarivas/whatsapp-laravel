@@ -103,4 +103,20 @@ class TeamApiController extends Controller
 
         return response()->json(['ok' => true, 'assigned_agent_id' => $agentId]);
     }
+
+    /** Cambia el modo IA/Humano de una conversación desde Komo. */
+    public function setAiMode(Request $request, string $conversationId): JsonResponse
+    {
+        $validated = $request->validate(['ai_enabled' => 'required|boolean']);
+
+        $accountId = $this->accountId($request);
+        $conversation = Conversation::where('account_id', $accountId)->findOrFail($conversationId);
+
+        $conversation->update([
+            'ai_autoreply_disabled' => ! $validated['ai_enabled'],
+            'ai_reply_count' => $validated['ai_enabled'] ? 0 : $conversation->ai_reply_count,
+        ]);
+
+        return response()->json(['ok' => true, 'ai_enabled' => $validated['ai_enabled']]);
+    }
 }

@@ -50,4 +50,8 @@ Route::prefix('v1')->middleware('throttle:public-api')->group(function () {
     // Reasignar conversación desde Komo cuando cambia el responsable del lead.
     Route::patch('/conversations/{id}/assign', [\App\Http\Controllers\Api\V1\TeamApiController::class, 'assignConversation'])
         ->middleware('api.key:conversations:write');
+
+    // Toggle IA/Humano en la conversación desde Komo (mismo scope que assign).
+    Route::patch('/conversations/{id}/ai-mode', [\App\Http\Controllers\Api\V1\TeamApiController::class, 'setAiMode'])
+        ->middleware('api.key:conversations:write');
 });

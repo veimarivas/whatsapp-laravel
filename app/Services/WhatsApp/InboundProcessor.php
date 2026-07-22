@@ -127,6 +127,11 @@ class InboundProcessor
                 'last_message_at' => now(),
                 'unread_count' => $conversation->unread_count + 1,
                 'status' => Conversation::STATUS_OPEN,
+                // Cada mensaje NUEVO del cliente reinicia el cupo de la IA:
+                // así la IA puede volver a responder aunque el conteo llegara
+                // al máximo en la ráfaga anterior. El máximo sigue evitando
+                // loops si el cliente manda muchos mensajes seguidos.
+                'ai_reply_count' => 0,
             ]);
 
             // Correlaciona respuestas con broadcasts (replied tracking).
