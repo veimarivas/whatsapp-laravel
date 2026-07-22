@@ -69,6 +69,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/settings/team/api-keys/{apiKey}', [\App\Http\Controllers\TeamController::class, 'revokeApiKey'])->name('team.api-keys.revoke');
     Route::post('/settings/team/webhooks', [\App\Http\Controllers\TeamController::class, 'storeWebhook'])->name('team.webhooks.store');
     Route::post('/settings/team/webhooks/{webhook}/toggle', [\App\Http\Controllers\TeamController::class, 'toggleWebhook'])->name('team.webhooks.toggle');
+    Route::patch('/settings/team/webhooks/{webhook}', [\App\Http\Controllers\TeamController::class, 'updateWebhook'])->name('team.webhooks.update');
     Route::delete('/settings/team/webhooks/{webhook}', [\App\Http\Controllers\TeamController::class, 'destroyWebhook'])->name('team.webhooks.destroy');
 
     // Presencia (heartbeat del layout cada 60s; online = visto hace <2 min)

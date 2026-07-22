@@ -283,6 +283,26 @@ class TeamController extends Controller
         return back()->with('success', $webhook->is_active ? 'Webhook activado.' : 'Webhook desactivado.');
     }
 
+    /** Actualiza url y/o eventos del webhook (el secreto NO se cambia). */
+    public function updateWebhook(Request $request, \App\Models\WebhookEndpoint $webhook): RedirectResponse
+    {
+        $this->requireAdmin($request);
+        abort_if($webhook->account_id !== $request->user()->account_id, 403);
+
+        $validated = $request->validate([
+            'url' => 'required|url:https|max:2048',
+            'events' => 'required|array|min:1',
+            'events.*' => Rule::in(\App\Services\Webhooks\Dispatcher::EVENTS),
+        ]);
+
+        $webhook->update([
+            'url' => $validated['url'],
+            'events' => $validated['events'],
+        ]);
+
+        return back()->with('success', 'Webhook actualizado.');
+    }
+
     public function destroyWebhook(Request $request, \App\Models\WebhookEndpoint $webhook): RedirectResponse
     {
         $this->requireAdmin($request);

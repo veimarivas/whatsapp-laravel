@@ -75,6 +75,27 @@ export default function Team({
     const inviteForm = useForm({ role: 'agent', label: '' });
     const keyForm = useForm({ name: '', scopes: ['contacts:read'] });
     const webhookForm = useForm({ url: '', events: ['message.received'] });
+    const [editingWebhookId, setEditingWebhookId] = useState(null);
+    const editWebhookForm = useForm({ url: '', events: [] });
+
+    const startEditWebhook = (hook) => {
+        editWebhookForm.setData({ url: hook.url, events: hook.events ?? [] });
+        setEditingWebhookId(hook.id);
+    };
+    const cancelEditWebhook = () => { setEditingWebhookId(null); editWebhookForm.reset(); };
+    const toggleEditEvent = (event) => {
+        editWebhookForm.setData(
+            'events',
+            editWebhookForm.data.events.includes(event) ? editWebhookForm.data.events.filter((s) => s !== event) : [...editWebhookForm.data.events, event],
+        );
+    };
+    const saveEditWebhook = (e, hookId) => {
+        e.preventDefault();
+        editWebhookForm.patch(route('team.webhooks.update', hookId), {
+            preserveScroll: true,
+            onSuccess: () => { setEditingWebhookId(null); editWebhookForm.reset(); },
+        });
+    };
 
     const invite = (e) => {
         e.preventDefault();
@@ -404,46 +425,95 @@ export default function Team({
 
                     <ul className="divide-y divide-gray-50">
                         {webhooks.map((hook) => (
-                            <li key={hook.id} className="flex items-center justify-between px-5 sm:px-6 py-3.5 hover:bg-gray-50 transition-colors">
-                                <div className="min-w-0 flex-1">
-                                    <p className="truncate font-mono text-xs text-gray-800 font-semibold">{hook.url}</p>
-                                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                                        {(hook.events ?? []).map((e) => (
-                                            <span key={e} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{e}</span>
-                                        ))}
-                                        {hook.failure_count > 0 && (
-                                            <span className="text-[10px] font-semibold text-red-500">{hook.failure_count} fallos seguidos</span>
-                                        )}
-                                        {hook.last_delivery_at && (
-                                            <span className="text-[10px] text-gray-400">última: {new Date(hook.last_delivery_at).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                                        )}
-                                    </div>
-                                </div>
-                                {isAdmin && (
-                                    <div className="ml-3 flex shrink-0 items-center gap-3">
-                                        <button
-                                            onClick={() => router.post(route('team.webhooks.toggle', hook.id), {}, { preserveScroll: true })}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ring-1 transition-all ${
-                                                hook.is_active
-                                                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100'
-                                                    : 'bg-gray-100 text-gray-600 ring-gray-200 hover:bg-gray-200'
+                            <li key={hook.id} className={`px-5 sm:px-6 py-3.5 transition-colors ${editingWebhookId === hook.id ? 'bg-amber-50/50' : 'hover:bg-gray-50'}`}>
+                                {editingWebhookId === hook.id ? (
+                                    <form onSubmit={(e) => saveEditWebhook(e, hook.id)} className="space-y-3">
+                                        <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Editando webhook</p>
+                                        <input
+                                            type="url"
+                                            value={editWebhookForm.data.url}
+                                            onChange={(e) => editWebhookForm.setData('url', e.target.value)}
+                                            required
+                                            className={`w-full px-3.5 py-2.5 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 ${
+                                                editWebhookForm.errors.url ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white'
                                             }`}
-                                        >
-                                            <span className={`w-1.5 h-1.5 rounded-full ${hook.is_active ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-                                            {hook.is_active ? 'Activo' : 'Inactivo'}
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                if (confirm('¿Eliminar este webhook?')) {
-                                                    router.delete(route('team.webhooks.destroy', hook.id), { preserveScroll: true });
-                                                }
-                                            }}
-                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                            </svg>
-                                        </button>
+                                        />
+                                        {editWebhookForm.errors.url && <p className="text-xs text-red-500 font-medium">{editWebhookForm.errors.url}</p>}
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {webhookEvents.map((event) => {
+                                                const selected = editWebhookForm.data.events.includes(event);
+                                                return (
+                                                    <button
+                                                        key={event}
+                                                        type="button"
+                                                        onClick={() => toggleEditEvent(event)}
+                                                        className={`rounded-full px-2.5 py-1 text-xs font-mono font-semibold transition-all ${
+                                                            selected ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300' : 'bg-white text-gray-500 ring-1 ring-gray-200 hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        {event}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        {editWebhookForm.errors.events && <p className="text-xs text-red-500 font-medium">{editWebhookForm.errors.events}</p>}
+                                        <div className="flex gap-2 justify-end">
+                                            <button type="button" onClick={cancelEditWebhook} className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+                                                Cancelar
+                                            </button>
+                                            <button type="submit" disabled={editWebhookForm.processing} className="px-4 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 shadow-sm">
+                                                {editWebhookForm.processing ? 'Guardando…' : 'Guardar cambios'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                ) : (
+                                    <div className="flex items-center justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate font-mono text-xs text-gray-800 font-semibold">{hook.url}</p>
+                                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                                                {(hook.events ?? []).map((e) => (
+                                                    <span key={e} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{e}</span>
+                                                ))}
+                                                {hook.failure_count > 0 && (
+                                                    <span className="text-[10px] font-semibold text-red-500">{hook.failure_count} fallos seguidos</span>
+                                                )}
+                                                {hook.last_delivery_at && (
+                                                    <span className="text-[10px] text-gray-400">última: {new Date(hook.last_delivery_at).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {isAdmin && (
+                                            <div className="ml-3 flex shrink-0 items-center gap-2">
+                                                <button
+                                                    onClick={() => router.post(route('team.webhooks.toggle', hook.id), {}, { preserveScroll: true })}
+                                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ring-1 transition-all ${
+                                                        hook.is_active
+                                                            ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100'
+                                                            : 'bg-gray-100 text-gray-600 ring-gray-200 hover:bg-gray-200'
+                                                    }`}
+                                                >
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${hook.is_active ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                                    {hook.is_active ? 'Activo' : 'Inactivo'}
+                                                </button>
+                                                <button
+                                                    onClick={() => startEditWebhook(hook)}
+                                                    title="Editar"
+                                                    className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    onClick={() => { if (confirm('¿Eliminar este webhook?')) { router.delete(route('team.webhooks.destroy', hook.id), { preserveScroll: true }); } }}
+                                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </li>
