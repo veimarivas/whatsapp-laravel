@@ -13,9 +13,11 @@ const ALL_SCOPES = [
     'contacts:read',
     'contacts:write',
     'conversations:read',
+    'conversations:write',
     'messages:write',
     'broadcasts:read',
     'broadcasts:write',
+    'team:write',
 ];
 
 function CopyBox({ value, label, color = 'emerald' }) {

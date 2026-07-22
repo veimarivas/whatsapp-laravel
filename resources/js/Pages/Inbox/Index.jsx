@@ -788,22 +788,17 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                                 )}
                                             </button>
                                         )}
-                                        {isAdmin ? (
-                                            <select
-                                                value={selected.assigned_agent_id ?? ''}
-                                                onChange={(e) => assign(e.target.value)}
-                                                className="rounded-xl border-gray-200 text-sm bg-gray-50 focus:ring-[#045474] focus:border-[#045474]"
-                                                title="Asignar agente"
-                                            >
-                                                <option value="">Sin asignar</option>
-                                                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                            </select>
-                                        ) : selected.assigned_agent ? (
-                                            <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold bg-gray-50 border border-gray-200 text-gray-600">
-                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                                                {selected.assigned_agent.name}
-                                            </span>
-                                        ) : null}
+                                        <span
+                                            title={isAdmin ? 'La asignación se cambia desde el lead en Komo' : 'Solo el admin puede reasignar (desde Komo)'}
+                                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold border ${
+                                                selected.assigned_agent
+                                                    ? 'bg-gray-50 border-gray-200 text-gray-700'
+                                                    : 'bg-amber-50 border-amber-200 text-amber-700'
+                                            }`}
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                                            {selected.assigned_agent?.name ?? 'Sin asignar'}
+                                        </span>
                                         <select
                                             value={selected.status}
                                             onChange={(e) => setStatus(e.target.value)}

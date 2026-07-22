@@ -42,4 +42,12 @@ Route::prefix('v1')->middleware('throttle:public-api')->group(function () {
 
     Route::post('/broadcasts', [ApiController::class, 'storeBroadcast'])
         ->middleware('api.key:broadcasts:write');
+
+    // Provisión de agentes desde Komo (u otro CRM externo).
+    Route::post('/team/provision', [\App\Http\Controllers\Api\V1\TeamApiController::class, 'provision'])
+        ->middleware('api.key:team:write');
+
+    // Reasignar conversación desde Komo cuando cambia el responsable del lead.
+    Route::patch('/conversations/{id}/assign', [\App\Http\Controllers\Api\V1\TeamApiController::class, 'assignConversation'])
+        ->middleware('api.key:conversations:write');
 });

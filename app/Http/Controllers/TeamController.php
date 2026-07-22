@@ -217,9 +217,9 @@ class TeamController extends Controller
             'name' => 'required|string|max:100',
             'scopes' => 'required|array|min:1',
             'scopes.*' => Rule::in([
-                'contacts:read', 'contacts:write', 'conversations:read',
+                'contacts:read', 'contacts:write', 'conversations:read', 'conversations:write',
                 'messages:write', 'broadcasts:read', 'broadcasts:write',
-                'notifications:read',
+                'notifications:read', 'team:write',
             ]),
         ]);
 
