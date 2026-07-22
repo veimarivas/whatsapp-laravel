@@ -6,6 +6,7 @@ use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\WhatsappConfig;
+use App\Services\Webhooks\Dispatcher;
 use RuntimeException;
 
 /**
@@ -76,6 +77,8 @@ class Messenger
             'last_message_at' => now(),
         ]);
 
+        $this->dispatchOutbound($conversation, $contact, $message->fresh());
+
         return $message->fresh();
     }
 
@@ -145,6 +148,8 @@ class Messenger
             'last_message_at' => now(),
         ]);
 
+        $this->dispatchOutbound($conversation, $contact, $message->fresh());
+
         return $message->fresh();
     }
 
@@ -189,6 +194,30 @@ class Messenger
         ]);
 
         return $message->fresh();
+    }
+
+    /**
+     * Notifica a integraciones externas (Komo, etc.) que salió un mensaje.
+     * Silencioso si Dispatcher no está disponible o si no hay endpoints
+     * suscritos — el envío principal no se retrasa por el webhook.
+     */
+    private function dispatchOutbound(Conversation $conversation, Contact $contact, Message $message): void
+    {
+        try {
+            app(Dispatcher::class)->dispatch($conversation->account_id, 'message.sent', [
+                'conversation_id' => $conversation->id,
+                'contact' => $contact->only(['id', 'phone', 'name', 'email', 'company']),
+                'message' => [
+                    'id' => $message->id,
+                    'type' => $message->content_type,
+                    'text' => $message->content_text,
+                    'wamid' => $message->message_id,
+                    'sender_type' => $message->sender_type, // 'agent' | 'bot'
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Webhook message.sent falló', ['error' => $e->getMessage()]);
+        }
     }
 
     /** Busca o crea la conversación abierta de un contacto. */

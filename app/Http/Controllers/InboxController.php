@@ -112,6 +112,23 @@ class InboxController extends Controller
         // ahora lo controla el agente con el toggle explícito del header.
         app(\App\Services\Flows\Runner::class)->pauseForConversation($conversation);
 
+        // Notifica al Komo (y otras integraciones suscritas) que salió un mensaje.
+        try {
+            app(\App\Services\Webhooks\Dispatcher::class)->dispatch($conversation->account_id, 'message.sent', [
+                'conversation_id' => $conversation->id,
+                'contact' => $conversation->contact->only(['id', 'phone', 'name', 'email', 'company']),
+                'message' => [
+                    'id' => $message->id,
+                    'type' => 'text',
+                    'text' => $validated['text'],
+                    'wamid' => $message->message_id,
+                    'sender_type' => Message::SENDER_AGENT,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Webhook message.sent falló', ['error' => $e->getMessage()]);
+        }
+
         return response()->json($message->fresh());
     }
 
