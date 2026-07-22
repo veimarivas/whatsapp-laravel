@@ -204,6 +204,10 @@ class Messenger
     private function dispatchOutbound(Conversation $conversation, Contact $contact, Message $message): void
     {
         try {
+            $sender = $message->sender_id
+                ? \App\Models\User::whereKey($message->sender_id)->first(['id', 'name', 'account_role'])
+                : null;
+
             app(Dispatcher::class)->dispatch($conversation->account_id, 'message.sent', [
                 'conversation_id' => $conversation->id,
                 'contact' => $contact->only(['id', 'phone', 'name', 'email', 'company']),
@@ -213,6 +217,8 @@ class Messenger
                     'text' => $message->content_text,
                     'wamid' => $message->message_id,
                     'sender_type' => $message->sender_type, // 'agent' | 'bot'
+                    'sender_name' => $sender?->name,        // null si el sender fue IA
+                    'sender_role' => $sender?->account_role,
                 ],
             ]);
         } catch (\Throwable $e) {

@@ -44,4 +44,10 @@ class Message extends Model
     {
         return $this->hasMany(MessageReaction::class);
     }
+
+    /** Autor del mensaje cuando sender_type=agent (bot=IA no tiene user). */
+    public function sender(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'sender_id');
+    }
 }

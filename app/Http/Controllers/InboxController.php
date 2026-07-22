@@ -55,6 +55,7 @@ class InboxController extends Controller
             ->with([
                 'reactions:id,message_id,emoji,actor_type',
                 'replyTo:id,content_text,content_type,sender_type',
+                'sender:id,name,account_role',
             ])
             ->orderBy('created_at')
             ->limit(500)
@@ -130,6 +131,8 @@ class InboxController extends Controller
                     'text' => $validated['text'],
                     'wamid' => $message->message_id,
                     'sender_type' => Message::SENDER_AGENT,
+                    'sender_name' => $request->user()->name,
+                    'sender_role' => $request->user()->account_role,
                 ],
             ]);
         } catch (\Throwable $e) {

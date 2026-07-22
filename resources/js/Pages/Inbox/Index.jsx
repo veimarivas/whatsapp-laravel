@@ -108,16 +108,32 @@ function StatusBadge({ status }) {
     );
 }
 
+function senderLabel(msg) {
+    if (msg.sender_type === 'bot') return { text: '✨ IA', color: 'text-violet-600' };
+    if (msg.sender_type === 'agent') {
+        const name = msg.sender?.name ?? 'Agente';
+        const role = msg.sender?.account_role;
+        const badge = role === 'owner' || role === 'admin' ? ' · Admin' : '';
+        return { text: `${name}${badge}`, color: 'text-[#045474]' };
+    }
+    return null;
+}
+
 function MessageBubble({ msg, onReply, onReact }) {
     const isCustomer = msg.sender_type === 'customer';
     const [showEmojis, setShowEmojis] = useState(false);
+    const author = senderLabel(msg);
     return (
         <div className={`group flex items-end gap-2 ${isCustomer ? 'justify-start' : 'justify-end'}`}>
             {!isCustomer && msg.message_id && (
                 <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="left" />
             )}
+            <div className={`flex flex-col max-w-[75%] ${isCustomer ? 'items-start' : 'items-end'}`}>
+            {!isCustomer && author && (
+                <span className={`text-[10px] font-bold mb-0.5 mr-2 ${author.color}`}>{author.text}</span>
+            )}
             <div
-                className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
+                className={`rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
                     isCustomer
                         ? 'bg-white text-gray-900 rounded-bl-md border border-gray-100'
                         : 'bg-gradient-to-br from-[#045474] to-[#1c486c] text-white rounded-br-md shadow-md shadow-[#045474]/20'
@@ -167,6 +183,7 @@ function MessageBubble({ msg, onReply, onReact }) {
                         <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-sm">{msg.reactions.map((r) => r.emoji).join('')}</span>
                     )}
                 </div>
+            </div>
             </div>
             {isCustomer && msg.message_id && (
                 <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="right" />
