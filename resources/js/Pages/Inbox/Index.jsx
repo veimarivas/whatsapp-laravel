@@ -364,6 +364,7 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const selected = conversations.find((c) => c.id === selectedId);
     const me = usePage().props.auth.user;
     const accountId = me?.account_id;
+    const isAdmin = me?.account_role === 'owner' || me?.account_role === 'admin';
 
     const loadConversations = useCallback(async () => {
         try {
@@ -787,15 +788,22 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                                 )}
                                             </button>
                                         )}
-                                        <select
-                                            value={selected.assigned_agent_id ?? ''}
-                                            onChange={(e) => assign(e.target.value)}
-                                            className="rounded-xl border-gray-200 text-sm bg-gray-50 focus:ring-[#045474] focus:border-[#045474]"
-                                            title="Asignar agente"
-                                        >
-                                            <option value="">Sin asignar</option>
-                                            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                        </select>
+                                        {isAdmin ? (
+                                            <select
+                                                value={selected.assigned_agent_id ?? ''}
+                                                onChange={(e) => assign(e.target.value)}
+                                                className="rounded-xl border-gray-200 text-sm bg-gray-50 focus:ring-[#045474] focus:border-[#045474]"
+                                                title="Asignar agente"
+                                            >
+                                                <option value="">Sin asignar</option>
+                                                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                            </select>
+                                        ) : selected.assigned_agent ? (
+                                            <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold bg-gray-50 border border-gray-200 text-gray-600">
+                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                                                {selected.assigned_agent.name}
+                                            </span>
+                                        ) : null}
                                         <select
                                             value={selected.status}
                                             onChange={(e) => setStatus(e.target.value)}

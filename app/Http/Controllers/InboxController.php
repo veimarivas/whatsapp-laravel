@@ -29,9 +29,16 @@ class InboxController extends Controller
     /** Lista de conversaciones (JSON, la UI hace polling). */
     public function conversations(Request $request): JsonResponse
     {
-        $conversations = Conversation::forAccount($request->user()->account_id)
+        $user = $request->user();
+
+        $conversations = Conversation::forAccount($user->account_id)
             ->with(['contact:id,name,phone,avatar_url', 'assignedAgent:id,name'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
+            // Restricción por rol: agent/viewer solo ven las conversaciones
+            // asignadas a ellos. admin/owner ven todo.
+            ->when(! $user->hasRoleAtLeast(\App\Models\User::ROLE_ADMIN),
+                fn ($q) => $q->where('assigned_agent_id', $user->id),
+            )
             ->orderByDesc('last_message_at')
             ->limit(100)
             ->get();
@@ -319,6 +326,15 @@ class InboxController extends Controller
 
     private function authorizeConversation(Request $request, Conversation $conversation): void
     {
-        abort_if($conversation->account_id !== $request->user()->account_id, 403);
+        $user = $request->user();
+
+        abort_if($conversation->account_id !== $user->account_id, 403);
+
+        // Restricción por rol: agent/viewer solo pueden interactuar con
+        // conversaciones que tienen asignadas. admin/owner sin restricción.
+        if (! $user->hasRoleAtLeast(\App\Models\User::ROLE_ADMIN)) {
+            abort_if($conversation->assigned_agent_id !== $user->id, 403,
+                'No tienes acceso a esta conversación. Pídele al admin que te la asigne.');
+        }
     }
 }
