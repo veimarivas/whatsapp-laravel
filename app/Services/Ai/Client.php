@@ -45,7 +45,14 @@ class Client
         $payload = [
             'model' => $this->config->model,
             'stream' => false,
-            'options' => ['num_predict' => $maxTokens],
+            'options' => [
+                'num_predict' => $maxTokens,
+                // Qwen2.5 soporta hasta 32k. Ollama por defecto usa solo 4096
+                // que se queda corto con nuestro RAG (15 chunks × 3000 chars).
+                // 16k da margen para system prompt + historial + knowledge + respuesta.
+                'num_ctx' => 16384,
+                'temperature' => 0.2, // más determinístico: menos alucinación de datos
+            ],
             'messages' => [
                 ...($system ? [['role' => 'system', 'content' => $system]] : []),
                 ...$messages,
