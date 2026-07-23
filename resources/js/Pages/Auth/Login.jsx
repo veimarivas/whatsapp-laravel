@@ -31,7 +31,7 @@ export default function Login({ status, canResetPassword }) {
                                 </svg>
                             </div>
                             <h4 className="text-2xl font-bold text-[#042048]">
-                                ¡Bienvenido de nuevo!
+                                ¡Bienvenido al CRM WhatsApp!
                             </h4>
                             <p className="text-sm text-[#718ca4] mt-1.5">
                                 Inicia sesión para continuar
