@@ -64,6 +64,23 @@ return [
             ]) : [],
         ],
 
+        // Conexión secundaria de solo lectura a la BD académica de ESAM.
+        // La usa el comando `wacrm:sync-oferta-academica` para importar
+        // programas + módulos + horarios + docentes como documentos de la
+        // base de conocimiento que consume la IA.
+        'esam_datos' => [
+            'driver' => 'mysql',
+            'host' => env('ESAM_DB_HOST', '127.0.0.1'),
+            'port' => env('ESAM_DB_PORT', '3306'),
+            'database' => env('ESAM_DB_DATABASE', 'esam_datos'),
+            'username' => env('ESAM_DB_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('ESAM_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => false,
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),
