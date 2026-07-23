@@ -9,7 +9,11 @@ use Illuminate\Support\Facades\Log;
 /** Trocea documentos en fragmentos indexables (~800 caracteres). */
 class Chunker
 {
-    private const MAX_CHUNK = 800;
+    // Chunks grandes: un programa académico completo (metadata + hasta 8
+    // módulos con sus docentes y horarios) cabe entero en un solo chunk,
+    // así el retrieval trae toda la info del programa junta y la IA no
+    // pierde contexto ni tiene que "adivinar" datos ausentes.
+    private const MAX_CHUNK = 3000;
 
     public function __construct(private readonly Embeddings $embeddings)
     {

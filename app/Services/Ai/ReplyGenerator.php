@@ -71,7 +71,7 @@ class ReplyGenerator
             '3. Si preguntan por un programa/curso que NO está en la base de conocimiento, di: "En este momento no tenemos ese programa en inscripción. Te puedo pasar con un asesor para más detalles o contarte sobre los programas vigentes."',
             '4. Cuando el cliente pida la lista de programas/oferta, muestra SOLO el nombre de cada programa (uno por línea, numerado). NO incluyas códigos (como "CIA-0114-26"), NI fechas, NI precios, NI cantidad de módulos en la lista. Después ofrece: "¿Sobre cuál te gustaría más información?".',
             '5. Cuando menciones un docente, usa SOLO su nombre completo. NUNCA muestres el correo, teléfono, ni ningún otro dato de contacto del docente.',
-            '6. Cuando el cliente pregunte por horarios de un módulo o programa, muestra TODAS las sesiones que aparecen en la base para ese módulo, en orden cronológico (de la fecha más temprana a la más tardía). No resumas ni muestres solo una. Formato claro: "DD/MM/YYYY de HH:MM a HH:MM".',
+            '6. Cuando el cliente pregunte por horarios de un módulo o programa, DEBES listar TODAS las sesiones tal como aparecen en la base bajo "Todos los horarios de este módulo" — LITERALMENTE, sin omitir NINGUNA, en el orden en que aparecen. NUNCA inventes ni cambies fechas u horas. Si el módulo tiene 3 sesiones muestra las 3; si tiene 16 muestra las 16. NO agregues días de la semana (lunes, martes, etc.) porque en la base solo hay fecha y no está calculado el día. Formato: "DD/MM/YYYY de HH:MM a HH:MM".',
             '7. Cuando enumeres programas o módulos, usa el nombre EXACTO tal como aparece en la base. No traduzcas, no acortes, no cambies mayúsculas.',
             '8. Los precios (matrícula, colegiatura) están en Bolivianos (Bs). Solo menciónalos cuando el cliente pregunte específicamente por costos.',
             '9. Considera SIEMPRE el historial completo del chat para responder con coherencia (no repetir info ya dada, recordar el programa que interesa al cliente).',
@@ -134,7 +134,7 @@ class ReplyGenerator
 
         $chunks = AiKnowledgeChunk::forAccount($accountId)
             ->whereRaw('MATCH(content) AGAINST(? IN BOOLEAN MODE)', [$terms->join(' ')])
-            ->limit(6)
+            ->limit(15)
             ->pluck('content');
 
         // Fallback LIKE: el índice FULLTEXT de InnoDB no ve filas de la
@@ -147,7 +147,7 @@ class ReplyGenerator
                         $query->orWhere('content', 'like', '%'.rtrim($term, '*').'%');
                     }
                 })
-                ->limit(6)
+                ->limit(15)
                 ->pluck('content');
         }
 
@@ -179,7 +179,7 @@ class ReplyGenerator
                 'score' => AiKnowledgeChunk::cosineSimilarity($queryVector, $chunk->embedding ?? []),
             ])
             ->sortByDesc('score')
-            ->take(6)
+            ->take(15)
             ->filter(fn ($item) => $item['score'] > 0.2)
             ->map(fn ($item) => '- '.mb_substr($item['content'], 0, 600))
             ->join("\n");
