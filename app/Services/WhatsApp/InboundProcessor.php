@@ -147,30 +147,17 @@ class InboundProcessor
             return [$contact, $conversation, $storedMessage, $isNewContact];
         });
 
-        // Dispara flows y automatizaciones DESPUÉS de commitear: el
-        // worker de la cola debe poder leer las filas recién insertadas.
-        \App\Jobs\ProcessFlowMessageJob::dispatch($contact->id, $conversation->id, $storedMessage->id);
-
         $text = $storedMessage->content_text;
-
-        if ($isNewContact) {
-            $this->createLeadDeal($contact, $conversation);
-            ProcessAutomationEventJob::dispatch('new_contact', $contact->id, $conversation->id, $text);
-        }
-
-        ProcessAutomationEventJob::dispatch('inbound_message', $contact->id, $conversation->id, $text);
-
-        if ($text) {
-            ProcessAutomationEventJob::dispatch('keyword', $contact->id, $conversation->id, $text);
-        }
-
-        // Bot IA al final: si un flow toma el mensaje, el job lo detecta
-        // y se abstiene (el chatbot estructurado tiene prioridad).
-        \App\Jobs\AiAutoReplyJob::dispatch($conversation->id);
-
-        // Webhooks salientes a integraciones externas.
         $dispatcher = app(\App\Services\Webhooks\Dispatcher::class);
         $contactData = $contact->only(['id', 'phone', 'name', 'email', 'company']);
+
+        // ORDEN IMPORTANTE — la cola es FIFO. Priorizamos:
+        //   1. Webhooks a integraciones (Komo, etc.): ligeros, deben salir YA
+        //      para que el CRM externo vea el mensaje casi en tiempo real.
+        //   2. Flows y automatizaciones: rápidos, procesan reglas locales.
+        //   3. AiAutoReplyJob al final: puede tardar 30-60s con Qwen y no debe
+        //      bloquear los webhooks. Si se pusiera antes, Komo esperaría a
+        //      que Ollama termine para recibir el mensaje del cliente.
 
         if ($isNewContact) {
             $dispatcher->dispatch($config->account_id, 'contact.created', ['contact' => $contactData]);
@@ -187,6 +174,26 @@ class InboundProcessor
                 'referral' => $storedMessage->referral, // atribución de anuncio (komo la guarda como source_ref)
             ],
         ]);
+
+        // Ahora sí, dispatch de flow + automations + AI (en ese orden).
+        // Todo esto pasa DESPUÉS que el webhook a Komo ya está encolado,
+        // así el mensaje aparece en Komo en 1-2s aunque Ollama tarde 60s.
+        \App\Jobs\ProcessFlowMessageJob::dispatch($contact->id, $conversation->id, $storedMessage->id);
+
+        if ($isNewContact) {
+            $this->createLeadDeal($contact, $conversation);
+            ProcessAutomationEventJob::dispatch('new_contact', $contact->id, $conversation->id, $text);
+        }
+
+        ProcessAutomationEventJob::dispatch('inbound_message', $contact->id, $conversation->id, $text);
+
+        if ($text) {
+            ProcessAutomationEventJob::dispatch('keyword', $contact->id, $conversation->id, $text);
+        }
+
+        // Bot IA al final: es el job más lento (30-60s con Qwen). Se abstiene
+        // si hay un flow activo (el chatbot estructurado tiene prioridad).
+        \App\Jobs\AiAutoReplyJob::dispatch($conversation->id);
     }
 
     /** @return array{0:string,1:?string,2:?string,3:?string} [content_type, content_text, media_id, interactive_reply_id] */
