@@ -85,7 +85,10 @@ class SyncOfertaAcademica extends Command
 
             $doc = AiKnowledgeDocument::create([
                 'account_id' => $accountId,
-                'title' => self::DOC_PREFIX.$p->nombre." [{$p->codigo}]",
+                // Título limpio: sin código ni prefijos ruidosos (el código queda
+                // dentro del contenido, sigue siendo buscable pero no lo cita la IA
+                // cuando lista programas).
+                'title' => self::DOC_PREFIX.$p->nombre,
                 'content' => $content,
             ]);
 
@@ -165,24 +168,26 @@ class SyncOfertaAcademica extends Command
                 $lines[] = "{$num}. ".trim($m->nombre);
 
                 if ($m->docente_nombres) {
+                    // Solo nombre completo del docente — sin correo ni contacto
+                    // (esa info es interna, el cliente no la necesita ni debe verla).
                     $docenteFullName = trim("{$m->docente_nombres} {$m->docente_apellidos}");
                     $lines[] = "   Docente: {$docenteFullName}";
-                    if ($m->docente_correo) {
-                        $lines[] = "   Contacto docente: {$m->docente_correo}";
-                    }
                 }
 
-                // Próximos horarios confirmados del módulo (máx 5)
+                // Todos los horarios confirmados del módulo, en orden cronológico.
+                // Un módulo puede tener varias sesiones (una por semana) y el
+                // cliente puede querer verlas todas para planificar.
                 $horarios = DB::connection('esam_datos')
                     ->table('horarios')
                     ->where('modulo_id', $m->id)
                     ->where('estado', 'Confirmado')
                     ->orderBy('fecha_desarrollo')
-                    ->limit(5)
+                    ->orderBy('hora_inicio')
+                    ->limit(50) // cota razonable: un semestre de clases semanales ≈ 16
                     ->get(['fecha_desarrollo', 'hora_inicio', 'hora_fin']);
 
                 if ($horarios->isNotEmpty()) {
-                    $lines[] = '   Sesiones programadas:';
+                    $lines[] = '   Todos los horarios de este módulo (orden cronológico):';
                     foreach ($horarios as $h) {
                         $lines[] = "     - {$h->fecha_desarrollo} de {$h->hora_inicio} a {$h->hora_fin}";
                     }
