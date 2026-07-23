@@ -363,6 +363,7 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [showContactPanel, setShowContactPanel] = useState(true);
+    const [showConversationList, setShowConversationList] = useState(true);
     const [replyTo, setReplyTo] = useState(null);
     const [notes, setNotes] = useState([]);
     const [noteDraft, setNoteDraft] = useState('');
@@ -633,16 +634,47 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
 
             <div className="h-[calc(100vh-8rem)] p-4">
                 <div className="flex h-full overflow-hidden rounded-2xl bg-white shadow-sm border border-gray-100">
-                    {/* COLUMNA 1: lista de conversaciones */}
-                    <aside className="w-96 shrink-0 flex flex-col border-r border-gray-100 bg-gray-50/30">
-                        <div className="p-4 border-b border-gray-100 bg-white space-y-3">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-lg font-bold text-gray-900">Conversaciones</h3>
+                    {/* COLUMNA 1: lista de conversaciones (colapsable) */}
+                    {!showConversationList && (
+                        <button
+                            type="button"
+                            onClick={() => setShowConversationList(true)}
+                            title="Mostrar conversaciones"
+                            className="shrink-0 w-10 flex items-center justify-center border-r border-gray-100 bg-white hover:bg-gray-50 transition-colors group"
+                        >
+                            <div className="flex flex-col items-center gap-2 text-gray-400 group-hover:text-[#045474]">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </svg>
                                 {totals.unread > 0 && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-500 to-red-500 text-white text-xs font-bold shadow-sm">
-                                        {totals.unread} sin leer
+                                    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-br from-rose-500 to-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">
+                                        {totals.unread}
                                     </span>
                                 )}
+                            </div>
+                        </button>
+                    )}
+                    <aside className={`${showConversationList ? 'w-96' : 'hidden'} shrink-0 flex flex-col border-r border-gray-100 bg-gray-50/30`}>
+                        <div className="p-4 border-b border-gray-100 bg-white space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <h3 className="text-lg font-bold text-gray-900">Conversaciones</h3>
+                                <div className="flex items-center gap-2">
+                                    {totals.unread > 0 && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-500 to-red-500 text-white text-xs font-bold shadow-sm">
+                                            {totals.unread} sin leer
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowConversationList(false)}
+                                        title="Ocultar conversaciones"
+                                        className="p-1.5 text-gray-400 hover:text-[#045474] hover:bg-gray-100 rounded-lg transition-colors"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                             <div className="relative">
                                 <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -758,6 +790,18 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                 {/* Header del chat */}
                                 <header className="flex items-center justify-between border-b border-gray-100 bg-white px-4 py-3 shadow-sm">
                                     <div className="flex items-center gap-3 min-w-0">
+                                        {!showConversationList && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowConversationList(true)}
+                                                title="Mostrar conversaciones"
+                                                className="p-2 text-gray-500 hover:text-[#045474] hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                                                </svg>
+                                            </button>
+                                        )}
                                         <Avatar name={selected.contact?.name || selected.contact?.phone} size="lg" />
                                         <div className="min-w-0">
                                             <p className="font-bold text-gray-900 truncate">{selected.contact?.name || selected.contact?.phone}</p>
