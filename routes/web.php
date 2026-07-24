@@ -39,6 +39,7 @@ Route::middleware('auth')->group(function () {
     // Inbox
     Route::get('/inbox', [InboxController::class, 'index'])->name('inbox');
     Route::get('/inbox/conversations', [InboxController::class, 'conversations'])->name('inbox.conversations');
+    Route::get('/inbox/search', [InboxController::class, 'search'])->name('inbox.search');
     Route::get('/inbox/conversations/{conversation}/messages', [InboxController::class, 'messages'])->name('inbox.messages');
     Route::post('/inbox/conversations/{conversation}/send', [InboxController::class, 'send'])->name('inbox.send');
     Route::post('/inbox/conversations/{conversation}/send-media', [InboxController::class, 'sendMedia'])->name('inbox.send-media');
@@ -50,6 +51,13 @@ Route::middleware('auth')->group(function () {
     Route::post('/inbox/conversations/{conversation}/notes', [InboxController::class, 'addNote'])->name('inbox.notes.add');
     Route::post('/inbox/conversations/{conversation}/ai-draft', [InboxController::class, 'aiDraft'])->name('inbox.ai-draft');
     Route::patch('/inbox/conversations/{conversation}/ai-mode', [InboxController::class, 'setAiMode'])->name('inbox.ai-mode');
+    Route::get('/inbox/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'available'])->name('inbox.quick-replies');
+
+    // Plantillas rápidas (settings)
+    Route::get('/settings/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'index'])->name('quick-replies.index');
+    Route::post('/settings/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'store'])->name('quick-replies.store');
+    Route::patch('/settings/quick-replies/{quickReply}', [\App\Http\Controllers\QuickReplyController::class, 'update'])->name('quick-replies.update');
+    Route::delete('/settings/quick-replies/{quickReply}', [\App\Http\Controllers\QuickReplyController::class, 'destroy'])->name('quick-replies.destroy');
 
     // IA
     Route::get('/settings/ai', [\App\Http\Controllers\AiController::class, 'edit'])->name('settings.ai');

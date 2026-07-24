@@ -370,6 +370,10 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [uploading, setUploading] = useState(false);
     const [drafting, setDrafting] = useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [quickReplies, setQuickReplies] = useState([]);
+    const [showQuickReplies, setShowQuickReplies] = useState(false);
+    const [slashQuery, setSlashQuery] = useState(null); // null = cerrado, string = filtrando
+    const [searchResults, setSearchResults] = useState(null); // null = no búsqueda, array = resultados full-text
     const [typingByConv, setTypingByConv] = useState({});
     const bottomRef = useRef(null);
     const selectedRef = useRef(null);
@@ -409,6 +413,45 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
         }, POLL_MS);
         return () => clearInterval(t);
     }, [loadConversations, loadMessages]);
+
+    // Cargar plantillas rápidas del user (mías + compartidas) al montar
+    useEffect(() => {
+        api(route('inbox.quick-replies')).then(setQuickReplies).catch(() => {});
+    }, []);
+
+    // Búsqueda full-text debounced: cuando el user tipea >=3 chars y contiene
+    // más de una palabra o parece "buscar" (no solo filtrar), consulta el endpoint.
+    useEffect(() => {
+        const q = search.trim();
+        if (q.length < 3) { setSearchResults(null); return; }
+        const t = setTimeout(() => {
+            api(route('inbox.search', { q })).then(setSearchResults).catch(() => setSearchResults([]));
+        }, 350);
+        return () => clearTimeout(t);
+    }, [search]);
+
+    /** Interpola variables {name} {phone} {email} {company} con datos del contacto seleccionado. */
+    const renderTemplate = (content) => {
+        const c = selected?.contact ?? {};
+        return content
+            .replaceAll('{name}', c.name ?? '')
+            .replaceAll('{phone}', c.phone ?? '')
+            .replaceAll('{email}', c.email ?? '')
+            .replaceAll('{company}', c.company ?? '');
+    };
+
+    const insertQuickReply = (reply) => {
+        // Si el borrador tenía un /atajo tipeado, lo reemplaza; si no, agrega.
+        const rendered = renderTemplate(reply.content);
+        if (slashQuery !== null) {
+            const cleaned = draft.replace(/\/\S*$/, rendered);
+            setDraft(cleaned);
+        } else {
+            setDraft(draft ? `${draft} ${rendered}` : rendered);
+        }
+        setSlashQuery(null);
+        setShowQuickReplies(false);
+    };
 
     useEffect(() => {
         if (!window.Echo || !accountId) return;
@@ -711,7 +754,39 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                         </div>
 
                         <div className="flex-1 overflow-y-auto">
-                            {filtered.length === 0 && (
+                            {/* Resultados de búsqueda full-text (encima de la lista normal) */}
+                            {searchResults && searchResults.length > 0 && (
+                                <div className="border-b-4 border-double border-emerald-100 bg-emerald-50/30">
+                                    <div className="px-4 py-2 flex items-center justify-between">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                            🔍 Encontrados en el historial ({searchResults.length})
+                                        </span>
+                                    </div>
+                                    {searchResults.map((res) => {
+                                        const conv = res.conversation;
+                                        const name = conv.contact?.name || conv.contact?.phone || 'Desconocido';
+                                        return (
+                                            <button
+                                                key={conv.id}
+                                                onClick={() => openConversation(conv)}
+                                                className="w-full text-left px-4 py-2.5 border-b border-emerald-100 hover:bg-white flex items-start gap-3"
+                                            >
+                                                <Avatar name={name} size="sm" />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="text-sm font-semibold text-gray-800 truncate">{name}</span>
+                                                        <span className="text-[10px] text-gray-400 shrink-0">{timeAgo(res.match_at)}</span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-600 truncate italic mt-0.5">
+                                                        {res.snippet}
+                                                    </p>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {filtered.length === 0 && !searchResults?.length && (
                                 <div className="p-8 text-center">
                                     <div className="mx-auto w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
                                         <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -950,12 +1025,54 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
 
                                         <VoiceRecorder onSend={sendFile} disabled={!hasWhatsappConfig} />
 
+                                        {/* Plantillas rápidas — botón */}
+                                        <div className="relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowQuickReplies(!showQuickReplies)}
+                                                disabled={!hasWhatsappConfig || quickReplies.length === 0}
+                                                title={quickReplies.length === 0 ? 'Crea plantillas en Ajustes → Plantillas' : 'Insertar plantilla'}
+                                                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50 transition-all shadow-sm"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                                </svg>
+                                            </button>
+                                            {showQuickReplies && (
+                                                <div className="absolute bottom-14 left-0 z-20 w-72 max-h-64 overflow-y-auto bg-white rounded-xl shadow-2xl border border-gray-100 py-2">
+                                                    <div className="px-3 py-1.5 flex items-center justify-between border-b border-gray-100">
+                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Plantillas</span>
+                                                        <button type="button" onClick={() => setShowQuickReplies(false)} className="text-gray-400 hover:text-gray-600">×</button>
+                                                    </div>
+                                                    {quickReplies.map((r) => (
+                                                        <button
+                                                            key={r.id}
+                                                            type="button"
+                                                            onClick={() => insertQuickReply(r)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-emerald-50 transition-colors"
+                                                        >
+                                                            <code className="inline-block px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold font-mono">/{r.shortcut}</code>
+                                                            <p className="text-xs text-gray-600 mt-1 truncate">{r.content}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <div className="relative flex-1">
                                             <textarea
                                                 value={draft}
-                                                onChange={(e) => { setDraft(e.target.value); if (e.target.value) announceTyping(); }}
+                                                onChange={(e) => {
+                                                    const v = e.target.value;
+                                                    setDraft(v);
+                                                    if (v) announceTyping();
+                                                    // Detecta "/query" al final: abre autocomplete filtrando por atajo
+                                                    const m = v.match(/(?:^|\s)\/(\S*)$/);
+                                                    setSlashQuery(m ? m[1].toLowerCase() : null);
+                                                }}
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                                                    if (e.key === 'Escape') setSlashQuery(null);
                                                 }}
                                                 placeholder="Escribe un mensaje…"
                                                 rows={1}
@@ -970,6 +1087,27 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                             >
                                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                             </button>
+                                            {/* Autocomplete slash: filtra plantillas por atajo mientras tipeás /xxx */}
+                                            {slashQuery !== null && (() => {
+                                                const matches = quickReplies.filter((r) => r.shortcut.toLowerCase().includes(slashQuery));
+                                                if (matches.length === 0) return null;
+                                                return (
+                                                    <div className="absolute bottom-14 left-0 z-20 w-72 max-h-56 overflow-y-auto bg-white rounded-xl shadow-2xl border border-emerald-200 py-1.5">
+                                                        <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">↹ Enter para insertar</div>
+                                                        {matches.map((r) => (
+                                                            <button
+                                                                key={r.id}
+                                                                type="button"
+                                                                onMouseDown={(e) => { e.preventDefault(); insertQuickReply(r); }}
+                                                                className="w-full text-left px-3 py-1.5 hover:bg-emerald-50 transition-colors"
+                                                            >
+                                                                <code className="inline-block px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold font-mono">/{r.shortcut}</code>
+                                                                <p className="text-xs text-gray-600 mt-0.5 truncate">{r.content}</p>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
                                             {showEmojiPicker && (
                                                 <div className="absolute bottom-14 right-0 z-10 flex flex-wrap gap-1 rounded-xl bg-white p-2 shadow-xl border border-gray-100 w-64">
                                                     {['😀','😁','😂','🤣','😊','😍','🤔','😎','😢','😡','👍','👎','❤️','🔥','🎉','🙏','👏','💯','✅','❌'].map((e) => (

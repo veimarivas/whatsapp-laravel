@@ -26,6 +26,59 @@ class InboxController extends Controller
         ]);
     }
 
+    /**
+     * Búsqueda global: encuentra mensajes que contengan las palabras del query
+     * (FULLTEXT en modo booleano con comodín) y devuelve las conversaciones
+     * a las que pertenecen + un snippet resaltando el match. Respeta la
+     * restricción por rol (agent solo ve las conversaciones asignadas).
+     */
+    public function search(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->query('q', ''));
+
+        if (mb_strlen($q) < 3) {
+            return response()->json([]);
+        }
+
+        $user = $request->user();
+
+        // Término booleano con comodín — tolera prefijos, ignora <3 letras
+        $terms = collect(preg_split('/\s+/', $q))
+            ->filter(fn ($t) => mb_strlen($t) >= 3)
+            ->map(fn ($t) => $t.'*')
+            ->join(' ');
+
+        if ($terms === '') {
+            return response()->json([]);
+        }
+
+        // Trae los últimos 40 mensajes que matchean + su conversación
+        $matches = Message::query()
+            ->whereHas('conversation', fn ($qq) => $qq
+                ->where('account_id', $user->account_id)
+                ->when(! $user->hasRoleAtLeast(\App\Models\User::ROLE_ADMIN),
+                    fn ($x) => $x->where('assigned_agent_id', $user->id)))
+            ->whereRaw('MATCH(content_text) AGAINST(? IN BOOLEAN MODE)', [$terms])
+            ->with(['conversation.contact:id,name,phone,avatar_url', 'conversation.assignedAgent:id,name'])
+            ->orderByDesc('created_at')
+            ->limit(40)
+            ->get(['id', 'conversation_id', 'content_text', 'sender_type', 'created_at']);
+
+        // Agrupa por conversación (varios matches en una conv aparecen una vez con el más reciente)
+        $grouped = $matches->groupBy('conversation_id')->map(function ($msgs) use ($q) {
+            $latest = $msgs->first();
+            $snippet = mb_substr(str_ireplace(explode(' ', $q), array_map(fn ($w) => "«{$w}»", explode(' ', $q)), $latest->content_text ?? ''), 0, 160);
+            return [
+                'conversation' => $latest->conversation,
+                'snippet' => $snippet,
+                'match_count' => $msgs->count(),
+                'match_at' => $latest->created_at,
+            ];
+        })->values();
+
+        return response()->json($grouped);
+    }
+
     /** Lista de conversaciones (JSON, la UI hace polling). */
     public function conversations(Request $request): JsonResponse
     {
