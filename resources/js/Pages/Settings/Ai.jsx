@@ -16,6 +16,11 @@ const PROVIDER_META = {
 export default function Ai({ config, documents }) {
     const { flash } = usePage().props;
 
+    const DEFAULT_HOURS = {
+        mon: [['08:00', '19:00']], tue: [['08:00', '19:00']], wed: [['08:00', '19:00']],
+        thu: [['08:00', '19:00']], fri: [['08:00', '19:00']], sat: [['09:00', '13:00']], sun: [],
+    };
+
     const form = useForm({
         provider: config?.provider ?? 'openai',
         model: config?.model ?? DEFAULT_MODELS.openai,
@@ -26,7 +31,21 @@ export default function Ai({ config, documents }) {
         is_active: config?.is_active ?? false,
         auto_reply_enabled: config?.auto_reply_enabled ?? false,
         auto_reply_max_per_conversation: config?.auto_reply_max_per_conversation ?? 3,
+        business_hours: config?.business_hours ?? null,
+        after_hours_message: config?.after_hours_message ?? '',
+        timezone: config?.timezone ?? 'America/La_Paz',
     });
+
+    const hoursEnabled = form.data.business_hours !== null;
+    const hours = form.data.business_hours ?? DEFAULT_HOURS;
+    const DAY_LABELS = { mon: 'Lun', tue: 'Mar', wed: 'Mié', thu: 'Jue', fri: 'Vie', sat: 'Sáb', sun: 'Dom' };
+
+    const setDayRange = (day, start, end) => {
+        const next = { ...(form.data.business_hours ?? DEFAULT_HOURS) };
+        next[day] = start && end ? [[start, end]] : [];
+        form.setData('business_hours', next);
+    };
+    const toggleHours = () => form.setData('business_hours', hoursEnabled ? null : DEFAULT_HOURS);
 
     const isOllama = form.data.provider === 'ollama';
 
@@ -218,6 +237,51 @@ export default function Ai({ config, documents }) {
                                         <span>respuestas por conversación</span>
                                     </label>
                                     <p className="mt-2 text-xs text-gray-500">Si un agente responde, el bot se apaga en esa conversación</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-100 space-y-3">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={hoursEnabled}
+                                    onChange={toggleHours}
+                                    className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <div>
+                                    <p className="text-sm font-semibold text-gray-700">Horario de atención</p>
+                                    <p className="text-xs text-gray-400">Fuera de horario la IA envía un mensaje predefinido en vez de responder</p>
+                                </div>
+                            </label>
+
+                            {hoursEnabled && (
+                                <div className="ml-7 rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-3">
+                                    <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+                                        {Object.entries(DAY_LABELS).map(([day, label]) => {
+                                            const range = hours[day]?.[0] ?? ['', ''];
+                                            const closed = range[0] === '' || range[1] === '';
+                                            return (
+                                                <div key={day} className={`rounded-lg p-2 border ${closed ? 'bg-gray-100 border-gray-200' : 'bg-white border-emerald-200'}`}>
+                                                    <p className="text-[10px] font-bold uppercase text-gray-500 text-center mb-1">{label}</p>
+                                                    <input type="time" value={range[0]} onChange={(e) => setDayRange(day, e.target.value, range[1])} className="w-full text-xs border-0 bg-transparent p-0 focus:ring-0" />
+                                                    <input type="time" value={range[1]} onChange={(e) => setDayRange(day, range[0], e.target.value)} className="w-full text-xs border-0 bg-transparent p-0 focus:ring-0" />
+                                                    {closed && <p className="text-[9px] text-gray-400 text-center">Cerrado</p>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Mensaje fuera de horario</label>
+                                        <textarea
+                                            rows={2}
+                                            value={form.data.after_hours_message}
+                                            onChange={(e) => form.setData('after_hours_message', e.target.value)}
+                                            placeholder="¡Hola! Nuestro horario de atención es lunes a viernes de 8:00 a 19:00. Te responderemos apenas volvamos. 🙏"
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+                                        />
+                                    </div>
+                                    <p className="text-[10px] text-gray-400">Zona horaria: {form.data.timezone}. Solo se envía una vez por día por conversación.</p>
                                 </div>
                             )}
                         </div>

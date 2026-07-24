@@ -65,6 +65,22 @@ class AiAutoReplyJob implements ShouldQueue
             return;
         }
 
+        // Fuera de horario de atención: enviar mensaje configurado (una vez
+        // por día por conversación para no spamear) y NO consumir Ollama.
+        if (! $config->isWithinBusinessHours() && $config->after_hours_message) {
+            $todayKey = now()->toDateString();
+            $lastSent = cache()->get("after_hours_sent:{$conversation->id}:{$todayKey}");
+            if (! $lastSent) {
+                try {
+                    $messenger->sendText($conversation, $config->after_hours_message);
+                    cache()->put("after_hours_sent:{$conversation->id}:{$todayKey}", true, now()->endOfDay());
+                } catch (\Throwable $e) {
+                    Log::warning('After-hours message falló', ['conv_id' => $conversation->id, 'error' => $e->getMessage()]);
+                }
+            }
+            return;
+        }
+
         // Enciendo el flag efímero: la UI del Inbox pintará una burbuja
         // "IA pensando..." mientras dure este job.
         $conversation->update(['ai_pending' => true]);

@@ -30,6 +30,9 @@ class AiController extends Controller
                 'is_active' => $config->is_active,
                 'auto_reply_enabled' => $config->auto_reply_enabled,
                 'auto_reply_max_per_conversation' => $config->auto_reply_max_per_conversation,
+                'business_hours' => $config->business_hours,
+                'after_hours_message' => $config->after_hours_message,
+                'timezone' => $config->timezone,
                 'has_key' => true,
                 'has_embeddings_key' => $config->hasSemanticSearch(),
             ] : null,
@@ -52,6 +55,9 @@ class AiController extends Controller
             'is_active' => 'boolean',
             'auto_reply_enabled' => 'boolean',
             'auto_reply_max_per_conversation' => 'integer|between:1,20',
+            'business_hours' => 'nullable|array',
+            'after_hours_message' => 'nullable|string|max:1024',
+            'timezone' => 'nullable|string|max:60',
         ]);
 
         $accountId = $request->user()->account_id;
