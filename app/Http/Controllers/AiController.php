@@ -136,6 +136,82 @@ class AiController extends Controller
         return back()->with('success', "Reindexados {$documents->count()} documentos ({$total} fragmentos).");
     }
 
+    /**
+     * Página de estadísticas de la IA: contadores, tasa de éxito y las
+     * últimas preguntas de clientes (para saber qué agregar al knowledge base).
+     */
+    public function stats(Request $request): Response
+    {
+        $accountId = $request->user()->account_id;
+
+        // Contadores de respuestas de la IA (sender_type='bot').
+        $botRepliesLast7d = \App\Models\Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+            ->where('sender_type', 'bot')
+            ->where('messages.created_at', '>=', now()->subDays(7))
+            ->count();
+        $botRepliesLast30d = \App\Models\Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+            ->where('sender_type', 'bot')
+            ->where('messages.created_at', '>=', now()->subDays(30))
+            ->count();
+        $botRepliesTotal = \App\Models\Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+            ->where('sender_type', 'bot')
+            ->count();
+
+        // Fallbacks (notificaciones tipo ai_fallback) — la IA no pudo responder.
+        $fallbacksLast30d = \App\Models\Notification::where('account_id', $accountId)
+            ->where('type', 'ai_fallback')
+            ->where('created_at', '>=', now()->subDays(30))
+            ->count();
+
+        // Tasa de éxito (respuestas bot / (respuestas bot + fallbacks) últimos 30d)
+        $successRate = ($botRepliesLast30d + $fallbacksLast30d) > 0
+            ? round($botRepliesLast30d / ($botRepliesLast30d + $fallbacksLast30d) * 100, 1)
+            : 100;
+
+        // Serie diaria últimos 14 días: cuántas respuestas IA por día
+        $daily = \App\Models\Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+            ->where('sender_type', 'bot')
+            ->where('messages.created_at', '>=', now()->subDays(13)->startOfDay())
+            ->selectRaw('DATE(messages.created_at) as day, COUNT(*) as count')
+            ->groupBy('day')
+            ->orderBy('day')
+            ->get()
+            ->keyBy('day');
+
+        $chart = collect(range(13, 0))->map(function ($daysAgo) use ($daily) {
+            $day = now()->subDays($daysAgo)->toDateString();
+            return [
+                'day' => $day,
+                'label' => now()->subDays($daysAgo)->translatedFormat('D d/m'),
+                'count' => (int) ($daily[$day]->count ?? 0),
+            ];
+        });
+
+        // Últimas preguntas del cliente (para ver qué le preguntan a la IA
+        // y saber qué agregar al knowledge base). Solo msgs de customer con IA activa.
+        $recentQuestions = \App\Models\Message::whereHas('conversation', fn ($q) => $q
+                ->where('account_id', $accountId)
+                ->where('ai_autoreply_disabled', false))
+            ->where('sender_type', 'customer')
+            ->whereNotNull('content_text')
+            ->with('conversation.contact:id,name,phone')
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get(['id', 'conversation_id', 'content_text', 'created_at']);
+
+        return Inertia::render('Settings/AiStats', [
+            'stats' => [
+                'replies_7d' => $botRepliesLast7d,
+                'replies_30d' => $botRepliesLast30d,
+                'replies_total' => $botRepliesTotal,
+                'fallbacks_30d' => $fallbacksLast30d,
+                'success_rate' => $successRate,
+            ],
+            'chart' => $chart,
+            'recentQuestions' => $recentQuestions,
+        ]);
+    }
+
     public function destroyDocument(Request $request, AiKnowledgeDocument $document): RedirectResponse
     {
         abort_if($document->account_id !== $request->user()->account_id, 403);

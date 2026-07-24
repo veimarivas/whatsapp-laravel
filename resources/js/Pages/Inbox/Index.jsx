@@ -160,7 +160,14 @@ function MessageBubble({ msg, onReply, onReact }) {
                     <video controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1 max-h-64 rounded-lg" />
                 )}
                 {msg.content_type === 'audio' && msg.media_url && (
-                    <audio controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1 w-64 max-w-full" />
+                    <>
+                        <audio controls src={`/whatsapp/media/${msg.media_url}`} className="mb-1 w-64 max-w-full" />
+                        {msg.transcript && (
+                            <div className={`mt-1.5 text-xs italic border-l-2 pl-2 ${isCustomer ? 'border-emerald-400 text-gray-600' : 'border-white/50 text-white/80'}`}>
+                                <span className="opacity-70">🎙</span> {msg.transcript}
+                            </div>
+                        )}
+                    </>
                 )}
                 {msg.content_type === 'document' && msg.media_url && (
                     <a

@@ -71,6 +71,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/settings/ai/documents', [\App\Http\Controllers\AiController::class, 'storeDocument'])->name('settings.ai.documents.store');
     Route::delete('/settings/ai/documents/{document}', [\App\Http\Controllers\AiController::class, 'destroyDocument'])->name('settings.ai.documents.destroy');
     Route::post('/settings/ai/reindex', [\App\Http\Controllers\AiController::class, 'reindex'])->name('settings.ai.reindex');
+    Route::get('/settings/ai/stats', [\App\Http\Controllers\AiController::class, 'stats'])->name('settings.ai.stats');
 
     // Equipo + API keys
     Route::get('/settings/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('settings.team');

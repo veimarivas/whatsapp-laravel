@@ -50,4 +50,17 @@ return [
         'provision_secret' => env('HUB_PROVISION_SECRET'),
     ],
 
+    // Whisper.cpp para transcripción de audios entrantes del cliente.
+    // Se configura en .env con:
+    //   WHISPER_BINARY=/root/whisper.cpp/main
+    //   WHISPER_MODEL=/root/whisper.cpp/models/ggml-base.bin
+    //   WHISPER_LANGUAGE=es
+    // Si WHISPER_BINARY no existe o no es ejecutable, TranscribeAudioJob se
+    // abstiene silenciosamente (los audios llegan sin transcripción, no rompe nada).
+    'whisper' => [
+        'binary' => env('WHISPER_BINARY'),
+        'model' => env('WHISPER_MODEL'),
+        'language' => env('WHISPER_LANGUAGE', 'es'),
+    ],
+
 ];

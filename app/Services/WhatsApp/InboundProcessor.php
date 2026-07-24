@@ -183,6 +183,11 @@ class InboundProcessor
             ],
         ]);
 
+        // Si es un audio, encolamos la transcripción (asincrónico, no bloquea nada).
+        if ($storedMessage->content_type === 'audio' && $storedMessage->media_url) {
+            \App\Jobs\TranscribeAudioJob::dispatch($storedMessage->id);
+        }
+
         // Ahora sí, dispatch de flow + automations + AI (en ese orden).
         // Todo esto pasa DESPUÉS que el webhook a Komo ya está encolado,
         // así el mensaje aparece en Komo en 1-2s aunque Ollama tarde 60s.
