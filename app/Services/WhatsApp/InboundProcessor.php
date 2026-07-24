@@ -4,6 +4,7 @@ namespace App\Services\WhatsApp;
 
 use App\Jobs\ProcessAutomationEventJob;
 use App\Models\BroadcastRecipient;
+use App\Models\AutoTagRule;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Deal;
@@ -148,6 +149,13 @@ class InboundProcessor
         });
 
         $text = $storedMessage->content_text;
+
+        // Auto-tagging: aplica reglas de keywords al contacto según el contenido.
+        // Se hace ANTES del webhook para que Komo reciba los tags actualizados.
+        if ($text) {
+            $this->applyAutoTags($contact, $text, $isNewContact);
+        }
+
         $dispatcher = app(\App\Services\Webhooks\Dispatcher::class);
         $contactData = $contact->only(['id', 'phone', 'name', 'email', 'company']);
 
@@ -305,6 +313,34 @@ class InboundProcessor
 
         if ($counter) {
             $recipient->broadcast?->increment($counter);
+        }
+    }
+
+    /**
+     * Aplica reglas de auto-tagging al contacto según keywords en el mensaje.
+     * Cada regla que matchea agrega su tag (silencioso si ya lo tenía).
+     * Si la regla tiene first_message_only=true, solo aplica cuando el contacto
+     * es nuevo (evita spam de tags en cada mensaje subsecuente).
+     */
+    private function applyAutoTags(Contact $contact, string $text, bool $isNewContact): void
+    {
+        $textLower = mb_strtolower($text);
+
+        $rules = AutoTagRule::forAccount($contact->account_id)
+            ->where('is_active', true)
+            ->when(! $isNewContact, fn ($q) => $q->where('first_message_only', false))
+            ->get();
+
+        $tagIds = [];
+        foreach ($rules as $rule) {
+            if (str_contains($textLower, mb_strtolower($rule->keyword))) {
+                $tagIds[] = $rule->tag_id;
+            }
+        }
+
+        if (! empty($tagIds)) {
+            // syncWithoutDetaching: solo agrega los tags nuevos, no toca los existentes.
+            $contact->tags()->syncWithoutDetaching(array_unique($tagIds));
         }
     }
 

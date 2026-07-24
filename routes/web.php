@@ -53,6 +53,12 @@ Route::middleware('auth')->group(function () {
     Route::patch('/inbox/conversations/{conversation}/ai-mode', [InboxController::class, 'setAiMode'])->name('inbox.ai-mode');
     Route::get('/inbox/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'available'])->name('inbox.quick-replies');
 
+    // Auto-tag rules (settings)
+    Route::get('/settings/auto-tags', [\App\Http\Controllers\AutoTagController::class, 'index'])->name('auto-tags.index');
+    Route::post('/settings/auto-tags', [\App\Http\Controllers\AutoTagController::class, 'store'])->name('auto-tags.store');
+    Route::post('/settings/auto-tags/{rule}/toggle', [\App\Http\Controllers\AutoTagController::class, 'toggle'])->name('auto-tags.toggle');
+    Route::delete('/settings/auto-tags/{rule}', [\App\Http\Controllers\AutoTagController::class, 'destroy'])->name('auto-tags.destroy');
+
     // Plantillas rápidas (settings)
     Route::get('/settings/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'index'])->name('quick-replies.index');
     Route::post('/settings/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'store'])->name('quick-replies.store');

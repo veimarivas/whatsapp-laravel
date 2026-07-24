@@ -48,3 +48,7 @@ Artisan::command('flows:process-timeouts', function (\App\Services\Flows\Runner 
 })->purpose('Cierra runs de flows que superaron el timeout de su política');
 
 Schedule::command('flows:process-timeouts')->everyFiveMinutes();
+
+// Cierra conversaciones abiertas sin actividad en 7 días. Se ejecuta 1×/día
+// a las 3 AM (poca carga). Se reabren automáticamente si el cliente escribe.
+Schedule::command('wacrm:auto-close-inactive --days=7')->dailyAt('03:00');
