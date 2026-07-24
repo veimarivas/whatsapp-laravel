@@ -15,6 +15,7 @@ class Dispatcher
     public const EVENTS = [
         'message.received',
         'message.sent',
+        'message.transcribed',
         'contact.created',
         'broadcast.completed',
     ];

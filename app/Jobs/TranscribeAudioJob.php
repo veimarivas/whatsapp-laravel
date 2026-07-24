@@ -129,6 +129,27 @@ class TranscribeAudioJob implements ShouldQueue
 
             if ($transcript !== '') {
                 $message->update(['transcript' => $transcript]);
+
+                // Notifica a integraciones (Komo) que el audio ya tiene texto.
+                // El receptor debe encontrar el evento previo por wamid y
+                // actualizar su payload con la transcripción.
+                try {
+                    app(\App\Services\Webhooks\Dispatcher::class)->dispatch(
+                        $message->conversation->account_id,
+                        'message.transcribed',
+                        [
+                            'conversation_id' => $message->conversation_id,
+                            'message' => [
+                                'id' => $message->id,
+                                'wamid' => $message->message_id,
+                                'transcript' => $transcript,
+                                'sender_type' => $message->sender_type,
+                            ],
+                        ]
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Webhook message.transcribed falló', ['error' => $e->getMessage()]);
+                }
             } else {
                 Log::info('TranscribeAudioJob: whisper devolvió texto vacío', ['message_id' => $message->id]);
             }
