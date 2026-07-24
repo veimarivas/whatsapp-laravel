@@ -31,6 +31,12 @@ Route::prefix('v1')->middleware('throttle:public-api')->group(function () {
     Route::post('/messages', [ApiController::class, 'sendMessage'])
         ->middleware('api.key:messages:write');
 
+    Route::post('/messages/media', [ApiController::class, 'sendMediaMessage'])
+        ->middleware('api.key:messages:write');
+
+    Route::get('/quick-replies', [ApiController::class, 'quickReplies'])
+        ->middleware('api.key:messages:write');
+
     Route::middleware('api.key:broadcasts:read')->group(function () {
         Route::get('/broadcasts', [ApiController::class, 'broadcasts']);
         Route::get('/broadcasts/{id}', [ApiController::class, 'showBroadcast']);

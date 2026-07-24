@@ -244,4 +244,67 @@ class ApiController extends Controller
 
         return response()->json($message, 201);
     }
+
+    /**
+     * Enviar archivo (imagen/audio/video/documento) por WhatsApp desde una
+     * integración externa (Komo). Recibe base64 + mime + filename opcional.
+     * Requiere scope messages:write.
+     */
+    public function sendMediaMessage(Request $request, Messenger $messenger): JsonResponse
+    {
+        $validated = $request->validate([
+            'to' => 'required|string|max:32',
+            'file_base64' => 'required|string', // hasta ~16MB base64 = 22MB approx
+            'mime_type' => 'required|string|max:100',
+            'filename' => 'nullable|string|max:200',
+            'caption' => 'nullable|string|max:1024',
+        ]);
+
+        $accountId = $this->accountId($request);
+
+        $connected = WhatsappConfig::forAccount($accountId)->where('status', 'connected')->exists();
+        if (! $connected) {
+            return response()->json(['message' => 'WhatsApp is not connected.'], 422);
+        }
+
+        $contents = base64_decode($validated['file_base64'], true);
+        if ($contents === false) {
+            return response()->json(['message' => 'file_base64 no es base64 válido.'], 422);
+        }
+
+        $contact = Contact::firstOrCreate(
+            ['account_id' => $accountId, 'phone_normalized' => Contact::normalizePhone($validated['to'])],
+            ['phone' => $validated['to']],
+        );
+        $conversation = $messenger->resolveConversation($contact);
+
+        try {
+            $message = $messenger->sendMedia(
+                $conversation,
+                $contents,
+                $validated['mime_type'],
+                $validated['filename'] ?? 'archivo',
+                $validated['caption'] ?? null,
+                Message::SENDER_AGENT,
+                null,
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+
+        return response()->json($message, 201);
+    }
+
+    /** Lista las plantillas rápidas de la cuenta (compartidas por todo el equipo). */
+    public function quickReplies(Request $request): JsonResponse
+    {
+        $accountId = $this->accountId($request);
+
+        return response()->json(
+            \App\Models\QuickReply::forAccount($accountId)
+                ->whereNull('user_id') // solo las compartidas del equipo (por API no filtramos por user)
+                ->orderBy('shortcut')
+                ->get(['id', 'shortcut', 'content'])
+        );
+    }
 }
