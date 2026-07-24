@@ -295,6 +295,36 @@ class ApiController extends Controller
         return response()->json($message, 201);
     }
 
+    /**
+     * Descarga binaria de un archivo de WhatsApp por su media_id.
+     * Usado por integraciones (Komo) para servir audio/imagen desde su dominio.
+     * Requiere que el media_id pertenezca a algún mensaje de la cuenta.
+     */
+    public function downloadMedia(Request $request, string $mediaId): \Symfony\Component\HttpFoundation\Response
+    {
+        $accountId = $this->accountId($request);
+
+        // Verificar que el media_id existe en algún mensaje de esta cuenta
+        $exists = Message::whereHas('conversation', fn ($q) => $q->where('account_id', $accountId))
+            ->where('media_url', $mediaId)
+            ->exists();
+        abort_unless($exists, 404, 'Media no encontrado en esta cuenta.');
+
+        $config = WhatsappConfig::forAccount($accountId)->where('status', 'connected')->first();
+        abort_unless($config, 422, 'WhatsApp no conectado.');
+
+        $api = \App\Services\WhatsApp\MetaApi::for($config);
+        $url = $api->getMediaUrl($mediaId);
+        abort_unless($url, 502, 'Meta no devolvió URL para este media.');
+
+        $response = $api->downloadMedia($url);
+
+        return response($response->body(), 200, [
+            'Content-Type' => $response->header('Content-Type') ?: 'application/octet-stream',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
+    }
+
     /** Lista las plantillas rápidas de la cuenta (compartidas por todo el equipo). */
     public function quickReplies(Request $request): JsonResponse
     {

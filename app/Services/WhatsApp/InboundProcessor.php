@@ -179,6 +179,7 @@ class InboundProcessor
                 'type' => $storedMessage->content_type,
                 'text' => $storedMessage->content_text,
                 'wamid' => $storedMessage->message_id,
+                'media_id' => $storedMessage->media_url, // Meta media_id — Komo lo usa para el proxy /leads/media/{id}
                 'referral' => $storedMessage->referral, // atribución de anuncio (komo la guarda como source_ref)
             ],
         ]);
