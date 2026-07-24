@@ -53,6 +53,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/inbox/conversations/{conversation}/ai-draft', [InboxController::class, 'aiDraft'])->name('inbox.ai-draft');
     Route::patch('/inbox/conversations/{conversation}/ai-mode', [InboxController::class, 'setAiMode'])->name('inbox.ai-mode');
     Route::get('/inbox/quick-replies', [\App\Http\Controllers\QuickReplyController::class, 'available'])->name('inbox.quick-replies');
+    Route::get('/broadcasts-metrics', [\App\Http\Controllers\BroadcastController::class, 'metrics'])->name('broadcasts.metrics');
+
+    // Detección y merge de contactos duplicados
+    Route::get('/contacts/duplicates', [\App\Http\Controllers\ContactMergeController::class, 'index'])->name('contacts.duplicates');
+    Route::post('/contacts/merge', [\App\Http\Controllers\ContactMergeController::class, 'merge'])->name('contacts.merge');
 
     // Auto-tag rules (settings)
     Route::get('/settings/auto-tags', [\App\Http\Controllers\AutoTagController::class, 'index'])->name('auto-tags.index');

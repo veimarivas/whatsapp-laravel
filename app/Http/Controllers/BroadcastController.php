@@ -76,6 +76,80 @@ class BroadcastController extends Controller
         ]);
     }
 
+    /**
+     * Dashboard de métricas de broadcasts: tasas globales + top campañas +
+     * evolución de últimos 30 días. Útil para el equipo de marketing.
+     */
+    public function metrics(Request $request): Response
+    {
+        $accountId = $request->user()->account_id;
+
+        // Totales agregados (sumas de counters de todos los broadcasts terminados)
+        $totals = Broadcast::forAccount($accountId)
+            ->whereIn('status', ['sent', 'sending'])
+            ->selectRaw('
+                COUNT(*) as broadcasts_count,
+                SUM(sent_count) as total_sent,
+                SUM(delivered_count) as total_delivered,
+                SUM(read_count) as total_read,
+                SUM(replied_count) as total_replied,
+                SUM(failed_count) as total_failed
+            ')
+            ->first();
+
+        $sent = (int) ($totals?->total_sent ?? 0);
+        $rates = [
+            'delivery' => $sent > 0 ? round(($totals->total_delivered / $sent) * 100, 1) : 0,
+            'read' => $sent > 0 ? round(($totals->total_read / $sent) * 100, 1) : 0,
+            'reply' => $sent > 0 ? round(($totals->total_replied / $sent) * 100, 1) : 0,
+            'failure' => $sent > 0 ? round(($totals->total_failed / $sent) * 100, 1) : 0,
+        ];
+
+        // Top 10 broadcasts por tasa de respuesta (los que más engagement generan)
+        $topByReply = Broadcast::forAccount($accountId)
+            ->where('status', 'sent')
+            ->where('sent_count', '>', 0)
+            ->selectRaw('id, name, template_name, sent_count, delivered_count, read_count, replied_count, created_at,
+                ROUND((replied_count * 100.0) / NULLIF(sent_count, 0), 1) as reply_rate')
+            ->orderByDesc('reply_rate')
+            ->limit(10)
+            ->get();
+
+        // Evolución últimos 30 días: cuántos mensajes enviados por día
+        $daily = Broadcast::forAccount($accountId)
+            ->where('created_at', '>=', now()->subDays(29)->startOfDay())
+            ->selectRaw('DATE(created_at) as day, SUM(sent_count) as sent, SUM(delivered_count) as delivered, SUM(read_count) as read_count')
+            ->groupBy('day')
+            ->orderBy('day')
+            ->get()
+            ->keyBy('day');
+
+        $chart = collect(range(29, 0))->map(function ($daysAgo) use ($daily) {
+            $day = now()->subDays($daysAgo)->toDateString();
+            return [
+                'day' => $day,
+                'label' => now()->subDays($daysAgo)->translatedFormat('d/m'),
+                'sent' => (int) ($daily[$day]->sent ?? 0),
+                'delivered' => (int) ($daily[$day]->delivered ?? 0),
+                'read' => (int) ($daily[$day]->read_count ?? 0),
+            ];
+        });
+
+        return Inertia::render('Broadcasts/Metrics', [
+            'totals' => [
+                'broadcasts' => (int) ($totals?->broadcasts_count ?? 0),
+                'sent' => $sent,
+                'delivered' => (int) ($totals?->total_delivered ?? 0),
+                'read' => (int) ($totals?->total_read ?? 0),
+                'replied' => (int) ($totals?->total_replied ?? 0),
+                'failed' => (int) ($totals?->total_failed ?? 0),
+            ],
+            'rates' => $rates,
+            'topByReply' => $topByReply,
+            'chart' => $chart,
+        ]);
+    }
+
     public function destroy(Request $request, Broadcast $broadcast): RedirectResponse
     {
         abort_if($broadcast->account_id !== $request->user()->account_id, 403);
