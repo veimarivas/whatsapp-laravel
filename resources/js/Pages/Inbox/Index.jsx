@@ -119,14 +119,46 @@ function senderLabel(msg) {
     return null;
 }
 
+/** Web Speech API: lee texto en voz alta. Singleton para poder parar el actual. */
+const ttsState = { current: null };
+function speakText(text, onEnd) {
+    if (! ('speechSynthesis' in window)) { onEnd?.(); return; }
+    // Si ya hay uno hablando, parar (comportamiento toggle)
+    if (ttsState.current) {
+        window.speechSynthesis.cancel();
+        const prev = ttsState.current;
+        ttsState.current = null;
+        prev.onEnd?.();
+        if (prev.text === text) return; // segundo click al mismo = solo parar
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'es-BO'; u.rate = 1.05; u.pitch = 1.0;
+    u.onend = () => { ttsState.current = null; onEnd?.(); };
+    u.onerror = () => { ttsState.current = null; onEnd?.(); };
+    window.speechSynthesis.speak(u);
+    ttsState.current = { text, onEnd };
+}
+
 function MessageBubble({ msg, onReply, onReact }) {
     const isCustomer = msg.sender_type === 'customer';
     const [showEmojis, setShowEmojis] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+
+    // Texto a leer: content_text para texto puro, transcript para audios
+    const readableText = msg.content_type === 'text' ? msg.content_text : (msg.transcript ?? null);
+
+    const toggleSpeak = () => {
+        if (!readableText) return;
+        if (isSpeaking) { window.speechSynthesis.cancel(); setIsSpeaking(false); return; }
+        setIsSpeaking(true);
+        speakText(readableText, () => setIsSpeaking(false));
+    };
     const author = senderLabel(msg);
     return (
         <div className={`group flex items-end gap-2 ${isCustomer ? 'justify-start' : 'justify-end'}`}>
             {!isCustomer && msg.message_id && (
-                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="left" />
+                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="left"
+                    onSpeak={readableText ? toggleSpeak : null} isSpeaking={isSpeaking} />
             )}
             <div className={`flex flex-col max-w-[75%] ${isCustomer ? 'items-start' : 'items-end'}`}>
             {!isCustomer && author && (
@@ -193,15 +225,35 @@ function MessageBubble({ msg, onReply, onReact }) {
             </div>
             </div>
             {isCustomer && msg.message_id && (
-                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="right" />
+                <BubbleActions onReply={() => onReply(msg)} showEmojis={showEmojis} setShowEmojis={setShowEmojis} onReact={(e) => onReact(msg, e)} side="right"
+                    onSpeak={readableText ? toggleSpeak : null} isSpeaking={isSpeaking} />
             )}
         </div>
     );
 }
 
-function BubbleActions({ onReply, showEmojis, setShowEmojis, onReact, side }) {
+function BubbleActions({ onReply, showEmojis, setShowEmojis, onReact, side, onSpeak, isSpeaking }) {
     return (
         <div className="relative flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {onSpeak && (
+                <button
+                    type="button"
+                    onClick={onSpeak}
+                    title={isSpeaking ? 'Detener lectura' : 'Leer en voz alta'}
+                    className={`rounded-full bg-white p-1.5 text-xs shadow-md hover:scale-110 transition-all ${isSpeaking ? 'text-emerald-600 animate-pulse' : 'text-gray-500 hover:text-emerald-600'}`}
+                >
+                    {isSpeaking ? (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" />
+                            <rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" />
+                        </svg>
+                    ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                        </svg>
+                    )}
+                </button>
+            )}
             <button type="button" onClick={onReply} title="Responder" className="rounded-full bg-white p-1.5 text-xs text-gray-500 shadow-md hover:text-[#045474] hover:scale-110 transition-all">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
@@ -381,6 +433,8 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
     const [showQuickReplies, setShowQuickReplies] = useState(false);
     const [slashQuery, setSlashQuery] = useState(null); // null = cerrado, string = filtrando
     const [searchResults, setSearchResults] = useState(null); // null = no búsqueda, array = resultados full-text
+    const [selectedIds, setSelectedIds] = useState(new Set()); // bulk selection en la sidebar
+    const [bulkBusy, setBulkBusy] = useState(false);
     const [typingByConv, setTypingByConv] = useState({});
     const bottomRef = useRef(null);
     const selectedRef = useRef(null);
@@ -590,6 +644,34 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
         if (!selectedId) return;
         await api(route('inbox.assign', selectedId), { method: 'PATCH', body: JSON.stringify({ agent_id: agentId || null }) });
         loadConversations();
+    };
+
+    const toggleSelected = (id) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    const clearSelection = () => setSelectedIds(new Set());
+
+    const bulkDo = async (action, agentId = null) => {
+        if (selectedIds.size === 0 || bulkBusy) return;
+        setBulkBusy(true);
+        try {
+            await api(route('inbox.bulk-action'), {
+                method: 'POST',
+                body: JSON.stringify({
+                    conversation_ids: Array.from(selectedIds),
+                    action,
+                    agent_id: agentId,
+                }),
+            });
+            clearSelection();
+            await loadConversations();
+        } catch (err) { setError(err.message); }
+        finally { setBulkBusy(false); }
     };
 
     const toggleAiMode = async () => {
@@ -809,14 +891,24 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                 const name = conv.contact?.name || conv.contact?.phone || 'Desconocido';
                                 const isActive = selectedId === conv.id;
                                 const typing = typingByConv[conv.id];
+                                const isChecked = selectedIds.has(conv.id);
                                 return (
-                                    <button
+                                    <div
                                         key={conv.id}
                                         onClick={() => openConversation(conv)}
-                                        className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-all flex items-start gap-3 ${
-                                            isActive ? 'bg-gradient-to-r from-[#045474]/5 to-transparent border-l-4 border-l-[#045474]' : 'hover:bg-white'
+                                        className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-all flex items-start gap-3 cursor-pointer ${
+                                            isActive ? 'bg-gradient-to-r from-[#045474]/5 to-transparent border-l-4 border-l-[#045474]' : isChecked ? 'bg-emerald-50/60' : 'hover:bg-white'
                                         }`}
                                     >
+                                        {isAdmin && (
+                                            <input
+                                                type="checkbox"
+                                                checked={isChecked}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={() => toggleSelected(conv.id)}
+                                                className="mt-3 w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 shrink-0"
+                                            />
+                                        )}
                                         <Avatar name={name} />
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2">
@@ -847,10 +939,31 @@ export default function Index({ hasWhatsappConfig, hasAi, members }) {
                                                 )}
                                             </div>
                                         </div>
-                                    </button>
+                                    </div>
                                 );
                             })}
                         </div>
+
+                        {/* Barra flotante de acciones en lote */}
+                        {selectedIds.size > 0 && (
+                            <div className="border-t-2 border-emerald-500 bg-emerald-50 px-3 py-2 flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-emerald-800">{selectedIds.size} seleccionadas</span>
+                                <button onClick={() => bulkDo('mark_read')} disabled={bulkBusy} title="Marcar leídas" className="px-2 py-1 text-xs bg-white border border-emerald-300 rounded-lg text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">✓ Leídas</button>
+                                <button onClick={() => bulkDo('close')} disabled={bulkBusy} title="Cerrar" className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-50">Cerrar</button>
+                                <button onClick={() => bulkDo('pending')} disabled={bulkBusy} title="Pendiente" className="px-2 py-1 text-xs bg-white border border-amber-300 rounded-lg text-amber-700 hover:bg-amber-100 disabled:opacity-50">Pend.</button>
+                                <select
+                                    onChange={(e) => { if (e.target.value) bulkDo('assign', e.target.value); e.target.value = ''; }}
+                                    disabled={bulkBusy}
+                                    className="text-xs px-2 py-1 bg-white border border-gray-300 rounded-lg text-gray-700 focus:ring-emerald-500"
+                                    defaultValue=""
+                                >
+                                    <option value="">Asignar…</option>
+                                    <option value="null" onClick={(e) => { e.preventDefault(); bulkDo('assign', null); }}>Sin asignar</option>
+                                    {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                </select>
+                                <button onClick={clearSelection} className="ml-auto text-xs text-gray-500 hover:text-gray-700">Cancelar</button>
+                            </div>
+                        )}
                     </aside>
 
                     {/* COLUMNA 2: chat */}

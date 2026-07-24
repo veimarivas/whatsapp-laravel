@@ -380,6 +380,50 @@ class InboxController extends Controller
         return response()->json($conversation->fresh());
     }
 
+    /**
+     * Aplica una acción a múltiples conversaciones a la vez. Ideal para
+     * limpiar el inbox después de una campaña grande (cerrar todo, asignar
+     * un batch a un agente, marcar leído).
+     *
+     * Solo admin/owner puede hacer bulk actions (los agents solo tienen
+     * acceso a sus propias conversaciones, no tiene sentido bulk allí).
+     */
+    public function bulkAction(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->hasRoleAtLeast(\App\Models\User::ROLE_ADMIN), 403);
+
+        $validated = $request->validate([
+            'conversation_ids' => 'required|array|min:1|max:200',
+            'conversation_ids.*' => 'uuid',
+            'action' => 'required|in:close,open,pending,mark_read,assign',
+            'agent_id' => 'nullable|uuid', // solo para action=assign
+        ]);
+
+        $accountId = $request->user()->account_id;
+
+        $query = Conversation::forAccount($accountId)->whereIn('id', $validated['conversation_ids']);
+
+        $updates = match ($validated['action']) {
+            'close' => ['status' => 'closed'],
+            'open' => ['status' => 'open'],
+            'pending' => ['status' => 'pending'],
+            'mark_read' => ['unread_count' => 0],
+            'assign' => (function () use ($validated, $accountId) {
+                if ($validated['agent_id']) {
+                    abort_unless(
+                        \App\Models\User::where('id', $validated['agent_id'])->where('account_id', $accountId)->exists(),
+                        422
+                    );
+                }
+                return ['assigned_agent_id' => $validated['agent_id']];
+            })(),
+        };
+
+        $count = $query->update($updates);
+
+        return response()->json(['ok' => true, 'updated' => $count]);
+    }
+
     private function authorizeConversation(Request $request, Conversation $conversation): void
     {
         $user = $request->user();

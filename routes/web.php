@@ -40,6 +40,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/inbox', [InboxController::class, 'index'])->name('inbox');
     Route::get('/inbox/conversations', [InboxController::class, 'conversations'])->name('inbox.conversations');
     Route::get('/inbox/search', [InboxController::class, 'search'])->name('inbox.search');
+    Route::post('/inbox/bulk-action', [InboxController::class, 'bulkAction'])->name('inbox.bulk-action');
     Route::get('/inbox/conversations/{conversation}/messages', [InboxController::class, 'messages'])->name('inbox.messages');
     Route::post('/inbox/conversations/{conversation}/send', [InboxController::class, 'send'])->name('inbox.send');
     Route::post('/inbox/conversations/{conversation}/send-media', [InboxController::class, 'sendMedia'])->name('inbox.send-media');
