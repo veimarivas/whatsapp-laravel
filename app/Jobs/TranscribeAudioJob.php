@@ -78,23 +78,40 @@ class TranscribeAudioJob implements ShouldQueue
         if (! is_dir($tempDir)) {
             mkdir($tempDir, 0775, true);
         }
-        $tempFile = $tempDir.'/'.$message->id.'.ogg';
-        file_put_contents($tempFile, $contents);
+        $oggFile = $tempDir.'/'.$message->id.'.ogg';
+        $wavFile = $tempDir.'/'.$message->id.'.wav';
+        file_put_contents($oggFile, $contents);
 
         try {
-            // 3. Ejecutar whisper.cpp. Flags:
-            //    -m modelo, -f archivo, -l idioma, -otxt salida como .txt
-            //    --no-timestamps para transcripción limpia sin marcas de tiempo
+            // 3. Convertir OGG → WAV 16kHz mono con ffmpeg (formato nativo de whisper).
+            //    Sin este paso, whisper.cpp compilado sin soporte de decodificación
+            //    devuelve texto vacío en vez de error. WhatsApp siempre manda .ogg/opus.
+            $ffmpegCmd = sprintf(
+                'ffmpeg -y -i %s -ar 16000 -ac 1 -c:a pcm_s16le %s 2>&1',
+                escapeshellarg($oggFile),
+                escapeshellarg($wavFile)
+            );
+            exec($ffmpegCmd, $ffmpegOut, $ffmpegCode);
+
+            if ($ffmpegCode !== 0 || ! is_file($wavFile)) {
+                Log::warning('TranscribeAudioJob: conversión ffmpeg falló', [
+                    'message_id' => $message->id,
+                    'return_code' => $ffmpegCode,
+                    'output' => implode("\n", array_slice($ffmpegOut, -5)),
+                ]);
+                return;
+            }
+
+            // 4. Ejecutar whisper.cpp sobre el WAV.
             $outputPrefix = $tempDir.'/'.$message->id;
             $cmd = sprintf(
                 '%s -m %s -f %s -l %s -otxt -nt --output-file %s 2>&1',
                 escapeshellcmd($binary),
                 escapeshellarg($model),
-                escapeshellarg($tempFile),
+                escapeshellarg($wavFile),
                 escapeshellarg($language),
                 escapeshellarg($outputPrefix)
             );
-
             exec($cmd, $output, $returnCode);
 
             if ($returnCode !== 0) {
@@ -106,18 +123,20 @@ class TranscribeAudioJob implements ShouldQueue
                 return;
             }
 
-            // 4. Leer archivo .txt de salida
+            // 5. Leer archivo .txt de salida
             $txtFile = $outputPrefix.'.txt';
             $transcript = is_file($txtFile) ? trim(file_get_contents($txtFile)) : '';
 
             if ($transcript !== '') {
                 $message->update(['transcript' => $transcript]);
+            } else {
+                Log::info('TranscribeAudioJob: whisper devolvió texto vacío', ['message_id' => $message->id]);
             }
 
-            // 5. Limpiar
             @unlink($txtFile);
         } finally {
-            @unlink($tempFile);
+            @unlink($oggFile);
+            @unlink($wavFile);
         }
     }
 }
