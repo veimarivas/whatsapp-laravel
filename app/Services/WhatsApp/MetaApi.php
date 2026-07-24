@@ -164,6 +164,28 @@ class MetaApi
         ]);
     }
 
+    /**
+     * Envía el indicador "escribiendo..." al cliente en WhatsApp.
+     * Meta lo entrega piggy-back del markAsRead: se marca leído el mensaje
+     * del cliente y a la vez se le muestra el typing indicator (dura ~25s).
+     * Si el wamid no es válido o el cliente no está en foreground, se ignora.
+     * Silencioso: no lanza excepción si falla, no debe bloquear al bot.
+     */
+    public function sendTypingIndicator(string $wamid): void
+    {
+        try {
+            $this->request()->post("{$this->base()}/{$this->config->phone_number_id}/messages", [
+                'messaging_product' => 'whatsapp',
+                'status' => 'read',
+                'message_id' => $wamid,
+                'typing_indicator' => ['type' => 'text'],
+            ]);
+        } catch (\Throwable $e) {
+            // Los typing indicators son best-effort: log y seguir.
+            \Illuminate\Support\Facades\Log::info('Typing indicator falló (best-effort)', ['error' => $e->getMessage()]);
+        }
+    }
+
     /** Lista las plantillas del WABA en Meta (para sincronizar). */
     public function listTemplates(): array
     {
